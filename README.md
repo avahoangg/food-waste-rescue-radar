@@ -21,7 +21,7 @@ Users enter:
 - Weather conditions
 - Notes
    
-The system estimates waste risk and suggest practical action.
+The system calculates waste risk and suggest practical action.
 
 ## Technology
 - Python
@@ -30,5 +30,7 @@ The system estimates waste risk and suggest practical action.
 
 ## Responsible AI
 The AI provides suggestions only.
+
 Food safety must be inspected by humans. 
+
 The AI does not decide whether leftovers are safe to be donated or continue serving.
