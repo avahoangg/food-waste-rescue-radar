@@ -1,5 +1,5 @@
 # Food-waste-rescue-radar
-AI-powered web app to predict and reduce food waste for schools and community events.
+An AI-powered web app to predict and reduce food waste for schools and community events.
 
 ## Features
 - Predict waste rate
