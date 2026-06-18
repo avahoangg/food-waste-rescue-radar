@@ -15,9 +15,11 @@ st.set_page_config(
 EVENT_TYPES = ["School lunch", "Community event"]
 LOCATIONS = ["Cafeteria", "Party / Event venue"]
 WEATHER_OPTIONS = ["Normal", "Sunny", "Rainy", "Cloudy", "Stormy", "Very hot"]
+
 HISTORY_FILE = Path("historical_data.csv")
 
 HISTORY_COLUMNS = [
+    "Username",
     "Time",
     "Event Type",
     "Location",
@@ -34,6 +36,9 @@ HISTORY_COLUMNS = [
 
 if "page" not in st.session_state:
     st.session_state.page = "home"
+
+if "username" not in st.session_state:
+    st.session_state.username = None
 
 
 def load_history():
@@ -117,6 +122,12 @@ def go_dashboard():
     st.session_state.page = "dashboard"
 
 
+def switch_user():
+    st.session_state.username = None
+    st.session_state.page = "home"
+    st.rerun()
+
+
 def get_risk_level(waste_rate):
     if waste_rate >= 25:
         return "High"
@@ -154,6 +165,53 @@ def get_basic_actions(waste_rate):
         "Current preparation level looks reasonable.",
         "Continue tracking attendance and leftovers for future planning."
     ]
+
+
+def show_username_page():
+    st.title("🍽️ Food Waste Rescue Radar")
+
+    st.subheader("Enter your username to continue")
+
+    st.write("""
+    Create a new username or enter an existing username to continue using your saved dashboard.
+    This is a simple MVP login for demo purposes.
+    """)
+
+    history = load_history()
+    existing_users = sorted(
+        history["Username"].dropna().astype(str).unique().tolist()
+    )
+
+    username = st.text_input(
+        "Username",
+        placeholder="Example: green_school_team"
+    )
+
+    if existing_users:
+        st.caption("Existing demo usernames:")
+        st.write(", ".join(existing_users[:10]))
+
+    if st.button("Continue"):
+        username = username.strip().lower().replace(" ", "_")
+
+        if username == "":
+            st.error("Please enter a username.")
+            return
+
+        st.session_state.username = username
+        st.session_state.page = "home"
+        st.rerun()
+
+
+def show_user_sidebar():
+    st.sidebar.write(f"Current user: **{st.session_state.username}**")
+    st.sidebar.button("Switch user", on_click=switch_user)
+
+    st.sidebar.markdown("---")
+    st.sidebar.button("Home", on_click=go_home)
+    st.sidebar.button("Predict Waste Rate", on_click=go_predict)
+    st.sidebar.button("Waste Reduction Guide", on_click=go_guide)
+    st.sidebar.button("Dashboard", on_click=go_dashboard)
 
 
 def show_home():
@@ -201,7 +259,7 @@ def show_home():
 
     with col3:
         st.markdown("### Dashboard")
-        st.write("View historical waste patterns and impact.")
+        st.write("View your saved waste patterns and impact.")
         st.button(
             "View Dashboard",
             on_click=go_dashboard,
@@ -337,6 +395,7 @@ def show_predict():
 
         save_history(
             {
+                "Username": st.session_state.username,
                 "Time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                 "Event Type": event_type,
                 "Location": location,
@@ -351,7 +410,7 @@ def show_predict():
             }
         )
 
-        st.success("This record has been saved to the dashboard.")
+        st.success("This record has been saved to your dashboard.")
 
         st.subheader("AI Analysis")
 
@@ -368,6 +427,7 @@ def show_predict():
         3. A short responsible AI and food safety reminder.
 
         Data:
+        Username: {st.session_state.username}
         Event type: {event_type}
         Location: {location}
         Expected attendance: {expected_attendance}
@@ -508,6 +568,7 @@ def show_guide():
         5. A short responsible AI and food safety reminder.
 
         Data:
+        Username: {st.session_state.username}
         Event type: {event_type}
         Location: {location}
         Expected weather: {expected_weather}
@@ -551,14 +612,15 @@ def show_dashboard():
     st.title("Dashboard")
 
     st.write("""
-    This dashboard shows saved food waste records from previous predictions.
+    This dashboard shows saved food waste records for your username.
     It helps identify waste patterns and estimate environmental and cost impact.
     """)
 
     history = load_history()
+    history = history[history["Username"] == st.session_state.username]
 
     if history.empty:
-        st.info("No historical data yet. Use Predict Waste Rate first.")
+        st.info("No historical data yet for this username. Use Predict Waste Rate first.")
         st.button("Back to Home", on_click=go_home)
         return
 
@@ -644,11 +706,16 @@ def show_dashboard():
     st.button("Back to Home", on_click=go_home)
 
 
-if st.session_state.page == "home":
-    show_home()
-elif st.session_state.page == "predict":
-    show_predict()
-elif st.session_state.page == "guide":
-    show_guide()
-elif st.session_state.page == "dashboard":
-    show_dashboard()
+if st.session_state.username is None:
+    show_username_page()
+else:
+    show_user_sidebar()
+
+    if st.session_state.page == "home":
+        show_home()
+    elif st.session_state.page == "predict":
+        show_predict()
+    elif st.session_state.page == "guide":
+        show_guide()
+    elif st.session_state.page == "dashboard":
+        show_dashboard()
