@@ -1,28 +1,59 @@
 import streamlit as st
+import pandas as pd
+from pathlib import Path
+from datetime import datetime
 from groq import Groq
 
 
 st.set_page_config(
     page_title="Food Waste Rescue Radar",
     page_icon="🍽️",
-    layout="centered"
+    layout="wide"
 )
 
 
 EVENT_TYPES = ["School lunch", "Community event"]
 LOCATIONS = ["Cafeteria", "Party / Event venue"]
-WEATHER_OPTIONS = [
-    "Normal",
-    "Sunny",
-    "Rainy",
-    "Cloudy",
-    "Stormy",
-    "Very hot"
+WEATHER_OPTIONS = ["Normal", "Sunny", "Rainy", "Cloudy", "Stormy", "Very hot"]
+HISTORY_FILE = Path("historical_data.csv")
+
+HISTORY_COLUMNS = [
+    "Time",
+    "Event Type",
+    "Location",
+    "Meal Type",
+    "Expected Attendance",
+    "Actual Attendance",
+    "Food Prepared",
+    "Leftover Portions",
+    "Waste Rate",
+    "Risk Level",
+    "Notes"
 ]
 
 
 if "page" not in st.session_state:
     st.session_state.page = "home"
+
+
+def load_history():
+    if not HISTORY_FILE.exists():
+        return pd.DataFrame(columns=HISTORY_COLUMNS)
+
+    history = pd.read_csv(HISTORY_FILE)
+
+    for column in HISTORY_COLUMNS:
+        if column not in history.columns:
+            history[column] = None
+
+    return history[HISTORY_COLUMNS]
+
+
+def save_history(row):
+    history = load_history()
+    new_row = pd.DataFrame([row])
+    updated_history = pd.concat([history, new_row], ignore_index=True)
+    updated_history.to_csv(HISTORY_FILE, index=False)
 
 
 def get_groq_client():
@@ -82,6 +113,10 @@ def go_guide():
     st.session_state.page = "guide"
 
 
+def go_dashboard():
+    st.session_state.page = "dashboard"
+
+
 def get_risk_level(waste_rate):
     if waste_rate >= 25:
         return "High"
@@ -97,6 +132,28 @@ def show_risk_message(risk_level):
         st.warning("Waste Risk: Medium")
     else:
         st.success("Waste Risk: Low")
+
+
+def get_basic_actions(waste_rate):
+    if waste_rate >= 25:
+        return [
+            "Reduce food preparation by around 10–20% next time.",
+            "Use pre-orders or attendance confirmation before preparing food.",
+            "Prepare food in smaller batches instead of all at once.",
+            "If leftovers are still safe, contact a verified donation partner."
+        ]
+
+    if waste_rate >= 10:
+        return [
+            "Monitor attendance more closely before preparing food.",
+            "Track which meals are often left over.",
+            "Keep donation or redistribution options available."
+        ]
+
+    return [
+        "Current preparation level looks reasonable.",
+        "Continue tracking attendance and leftovers for future planning."
+    ]
 
 
 def show_home():
@@ -122,7 +179,7 @@ def show_home():
 
     st.header("What would you like to do?")
 
-    col1, col2 = st.columns(2)
+    col1, col2, col3 = st.columns(3)
 
     with col1:
         st.markdown("### Predict Waste Rate")
@@ -139,6 +196,15 @@ def show_home():
         st.button(
             "Start Guide",
             on_click=go_guide,
+            use_container_width=True
+        )
+
+    with col3:
+        st.markdown("### Dashboard")
+        st.write("View historical waste patterns and impact.")
+        st.button(
+            "View Dashboard",
+            on_click=go_dashboard,
             use_container_width=True
         )
 
@@ -166,42 +232,38 @@ def show_predict():
     - High: 25% or more waste rate
     """)
 
-    event_type = st.selectbox(
-        "Event type",
-        EVENT_TYPES
-    )
+    event_type = st.selectbox("Event type", EVENT_TYPES)
+    location = st.selectbox("Location", LOCATIONS)
 
-    location = st.selectbox(
-        "Location",
-        LOCATIONS
-    )
+    col1, col2 = st.columns(2)
 
-    expected_attendance = st.number_input(
-        "Expected attendance",
-        min_value=0,
-        step=1
-    )
+    with col1:
+        expected_attendance = st.number_input(
+            "Expected attendance",
+            min_value=0,
+            step=1
+        )
 
-    actual_attendance = st.number_input(
-        "Actual attendance",
-        min_value=0,
-        step=1
-    )
+        food_prepared = st.number_input(
+            "Food prepared (portions)",
+            min_value=0,
+            step=1
+        )
 
-    food_prepared = st.number_input(
-        "Food prepared (portions)",
-        min_value=0,
-        step=1
-    )
+    with col2:
+        actual_attendance = st.number_input(
+            "Actual attendance",
+            min_value=0,
+            step=1
+        )
 
-    leftover_portions = st.number_input(
-        "Leftover portions",
-        min_value=0,
-        step=1
-    )
+        leftover_portions = st.number_input(
+            "Leftover portions",
+            min_value=0,
+            step=1
+        )
 
     meal_type = st.text_input("Meal type")
-
     notes = st.text_area("Notes")
 
     if st.button("Analyze Waste Rate"):
@@ -219,8 +281,30 @@ def show_predict():
 
         show_risk_message(risk_level)
 
-        st.metric("Waste Rate", f"{waste_rate:.1f}%")
-        st.metric("Attendance Gap", attendance_gap)
+        result_col1, result_col2, result_col3, result_col4 = st.columns(4)
+
+        with result_col1:
+            st.metric("Waste Rate", f"{waste_rate:.1f}%")
+
+        with result_col2:
+            st.metric("Risk Level", risk_level)
+
+        with result_col3:
+            st.metric("Attendance Gap", attendance_gap)
+
+        with result_col4:
+            st.metric("Leftover Portions", leftover_portions)
+
+        co2_impact = leftover_portions * 0.5
+        cost_impact = leftover_portions * 2
+
+        impact_col1, impact_col2 = st.columns(2)
+
+        with impact_col1:
+            st.metric("Estimated CO₂ Impact", f"{co2_impact:.1f} kg")
+
+        with impact_col2:
+            st.metric("Estimated Cost Impact", f"${cost_impact:.0f}")
 
         st.subheader("Basic Explanation")
 
@@ -246,11 +330,28 @@ def show_predict():
                 "be related to meal preference, portion size, or preparation planning."
             )
 
-        if meal_type:
-            st.write(f"Meal type: {meal_type}")
+        st.subheader("Basic Waste Reduction Actions")
 
-        if notes:
-            st.write(f"Additional notes: {notes}")
+        for action in get_basic_actions(waste_rate):
+            st.write(f"- {action}")
+
+        save_history(
+            {
+                "Time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "Event Type": event_type,
+                "Location": location,
+                "Meal Type": meal_type if meal_type else "Unknown",
+                "Expected Attendance": expected_attendance,
+                "Actual Attendance": actual_attendance,
+                "Food Prepared": food_prepared,
+                "Leftover Portions": leftover_portions,
+                "Waste Rate": round(waste_rate, 2),
+                "Risk Level": risk_level,
+                "Notes": notes
+            }
+        )
+
+        st.success("This record has been saved to the dashboard.")
 
         st.subheader("AI Analysis")
 
@@ -446,9 +547,108 @@ def show_guide():
     st.button("Back to Home", on_click=go_home)
 
 
+def show_dashboard():
+    st.title("Dashboard")
+
+    st.write("""
+    This dashboard shows saved food waste records from previous predictions.
+    It helps identify waste patterns and estimate environmental and cost impact.
+    """)
+
+    history = load_history()
+
+    if history.empty:
+        st.info("No historical data yet. Use Predict Waste Rate first.")
+        st.button("Back to Home", on_click=go_home)
+        return
+
+    history["Waste Rate"] = pd.to_numeric(history["Waste Rate"], errors="coerce")
+    history["Leftover Portions"] = pd.to_numeric(
+        history["Leftover Portions"],
+        errors="coerce"
+    )
+
+    total_records = len(history)
+    average_waste = history["Waste Rate"].mean()
+    total_leftovers = history["Leftover Portions"].sum()
+    total_co2 = total_leftovers * 0.5
+    total_cost = total_leftovers * 2
+
+    col1, col2, col3, col4 = st.columns(4)
+
+    with col1:
+        st.metric("Total Records", total_records)
+
+    with col2:
+        st.metric("Average Waste Rate", f"{average_waste:.1f}%")
+
+    with col3:
+        st.metric("Total Leftovers", f"{total_leftovers:.0f} portions")
+
+    with col4:
+        st.metric("Estimated CO₂ Impact", f"{total_co2:.1f} kg")
+
+    st.metric("Estimated Cost Impact", f"${total_cost:.0f}")
+
+    st.subheader("Recent Records")
+    st.dataframe(history.tail(10), use_container_width=True)
+
+    st.subheader("Waste Rate Trend")
+    trend_data = history[["Waste Rate"]].reset_index(drop=True)
+    st.line_chart(trend_data)
+
+    st.subheader("Average Waste Rate by Meal Type")
+
+    meal_chart = (
+        history.groupby("Meal Type")["Waste Rate"]
+        .mean()
+        .sort_values(ascending=False)
+    )
+
+    st.bar_chart(meal_chart)
+
+    st.subheader("Average Waste Rate by Event Type")
+
+    event_chart = (
+        history.groupby("Event Type")["Waste Rate"]
+        .mean()
+        .sort_values(ascending=False)
+    )
+
+    st.bar_chart(event_chart)
+
+    st.subheader("Pattern Detection")
+
+    worst_meal = meal_chart.idxmax()
+    worst_event = event_chart.idxmax()
+
+    st.write(f"Most wasteful meal type: {worst_meal}")
+    st.write(f"Highest waste event type: {worst_event}")
+
+    if average_waste >= 25:
+        st.warning(
+            "Overall waste level is high. The organization should improve attendance "
+            "tracking and reduce over-preparation."
+        )
+    elif average_waste >= 10:
+        st.warning(
+            "Overall waste level is medium. Monitoring and small preparation adjustments "
+            "may help reduce waste."
+        )
+    else:
+        st.success(
+            "Overall waste level is low. Current preparation planning looks reasonable."
+        )
+
+    st.markdown("---")
+    st.button("Back to Home", on_click=go_home)
+
+
 if st.session_state.page == "home":
     show_home()
 elif st.session_state.page == "predict":
     show_predict()
 elif st.session_state.page == "guide":
     show_guide()
+elif st.session_state.page == "dashboard":
+    show_dashboard()
