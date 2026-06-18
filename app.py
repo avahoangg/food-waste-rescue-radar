@@ -30,7 +30,7 @@ HISTORY_COLUMNS = [
     "Leftover Portions",
     "Waste Rate",
     "Risk Level",
-    "Notes"
+    "Notes",
 ]
 
 
@@ -86,15 +86,15 @@ def ask_ai(prompt):
                         "You are a helpful AI assistant for food waste reduction. "
                         "Give practical, realistic, and safe recommendations. "
                         "Do not give food safety guarantees."
-                    )
+                    ),
                 },
                 {
                     "role": "user",
-                    "content": prompt
-                }
+                    "content": prompt,
+                },
             ],
             temperature=0.4,
-            max_tokens=700
+            max_tokens=700,
         )
 
         return response.choices[0].message.content
@@ -151,19 +151,19 @@ def get_basic_actions(waste_rate):
             "Reduce food preparation by around 10–20% next time.",
             "Use pre-orders or attendance confirmation before preparing food.",
             "Prepare food in smaller batches instead of all at once.",
-            "If leftovers are still safe, contact a verified donation partner."
+            "If leftovers are still safe, contact a verified donation partner.",
         ]
 
     if waste_rate >= 10:
         return [
             "Monitor attendance more closely before preparing food.",
             "Track which meals are often left over.",
-            "Keep donation or redistribution options available."
+            "Keep donation or redistribution options available.",
         ]
 
     return [
         "Current preparation level looks reasonable.",
-        "Continue tracking attendance and leftovers for future planning."
+        "Continue tracking attendance and leftovers for future planning.",
     ]
 
 
@@ -177,19 +177,10 @@ def show_username_page():
     This is a simple MVP login for demo purposes.
     """)
 
-    history = load_history()
-    existing_users = sorted(
-        history["Username"].dropna().astype(str).unique().tolist()
-    )
-
     username = st.text_input(
         "Username",
-        placeholder="Example: green_school_team"
+        placeholder="Example: green_school_team",
     )
-
-    if existing_users:
-        st.caption("Existing demo usernames:")
-        st.write(", ".join(existing_users[:10]))
 
     if st.button("Continue"):
         username = username.strip().lower().replace(" ", "_")
@@ -245,7 +236,7 @@ def show_home():
         st.button(
             "Start Prediction",
             on_click=go_predict,
-            use_container_width=True
+            use_container_width=True,
         )
 
     with col2:
@@ -254,7 +245,7 @@ def show_home():
         st.button(
             "Start Guide",
             on_click=go_guide,
-            use_container_width=True
+            use_container_width=True,
         )
 
     with col3:
@@ -263,7 +254,7 @@ def show_home():
         st.button(
             "View Dashboard",
             on_click=go_dashboard,
-            use_container_width=True
+            use_container_width=True,
         )
 
     st.markdown("---")
@@ -299,26 +290,26 @@ def show_predict():
         expected_attendance = st.number_input(
             "Expected attendance",
             min_value=0,
-            step=1
+            step=1,
         )
 
         food_prepared = st.number_input(
             "Food prepared (portions)",
             min_value=0,
-            step=1
+            step=1,
         )
 
     with col2:
         actual_attendance = st.number_input(
             "Actual attendance",
             min_value=0,
-            step=1
+            step=1,
         )
 
         leftover_portions = st.number_input(
             "Leftover portions",
             min_value=0,
-            step=1
+            step=1,
         )
 
     meal_type = st.text_input("Meal type")
@@ -406,7 +397,7 @@ def show_predict():
                 "Leftover Portions": leftover_portions,
                 "Waste Rate": round(waste_rate, 2),
                 "Risk Level": risk_level,
-                "Notes": notes
+                "Notes": notes,
             }
         )
 
@@ -465,31 +456,31 @@ def show_guide():
     event_type = st.selectbox(
         "Event type",
         EVENT_TYPES,
-        key="guide_event_type"
+        key="guide_event_type",
     )
 
     location = st.selectbox(
         "Location",
         LOCATIONS,
-        key="guide_location"
+        key="guide_location",
     )
 
     expected_weather = st.selectbox(
         "Expected weather",
-        WEATHER_OPTIONS
+        WEATHER_OPTIONS,
     )
 
     expected_attendance = st.number_input(
         "Expected attendance",
         min_value=0,
         step=1,
-        key="guide_expected_attendance"
+        key="guide_expected_attendance",
     )
 
     food_should_be_prepared = st.number_input(
         "Food planned to be prepared (portions)",
         min_value=0,
-        step=1
+        step=1,
     )
 
     notes = st.text_area("Notes", key="guide_notes")
@@ -627,7 +618,7 @@ def show_dashboard():
     history["Waste Rate"] = pd.to_numeric(history["Waste Rate"], errors="coerce")
     history["Leftover Portions"] = pd.to_numeric(
         history["Leftover Portions"],
-        errors="coerce"
+        errors="coerce",
     )
 
     total_records = len(history)
