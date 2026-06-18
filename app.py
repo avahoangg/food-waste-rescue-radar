@@ -1,5 +1,5 @@
 import streamlit as st
-from google import genai
+from groq import Groq
 
 
 st.set_page_config(
@@ -25,29 +25,49 @@ if "page" not in st.session_state:
     st.session_state.page = "home"
 
 
-def get_gemini_client():
-    api_key = st.secrets.get("GEMINI_API_KEY", None)
+def get_groq_client():
+    api_key = st.secrets.get("GROQ_API_KEY", None)
 
     if not api_key:
         return None
 
-    return genai.Client(api_key=api_key)
+    return Groq(api_key=api_key)
 
 
-def ask_gemini(prompt):
-    client = get_gemini_client()
+def ask_ai(prompt):
+    client = get_groq_client()
 
     if client is None:
         return None
 
     try:
-        response = client.models.generate_content(
-            model="gemini-2.0-flash",
-            contents=prompt
+        response = client.chat.completions.create(
+            model="llama-3.1-8b-instant",
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        "You are a helpful AI assistant for food waste reduction. "
+                        "Give practical, realistic, and safe recommendations. "
+                        "Do not give food safety guarantees."
+                    )
+                },
+                {
+                    "role": "user",
+                    "content": prompt
+                }
+            ],
+            temperature=0.4,
+            max_tokens=700
         )
-        return response.text
-    except Exception as error:
-        return f"Gemini analysis is unavailable right now. Error: {error}"
+
+        return response.choices[0].message.content
+
+    except Exception:
+        return (
+            "AI analysis is temporarily unavailable because the free API quota may be limited. "
+            "The app still provides basic rule-based recommendations."
+        )
 
 
 def go_home():
@@ -232,7 +252,7 @@ def show_predict():
         if notes:
             st.write(f"Additional notes: {notes}")
 
-        st.subheader("Gemini AI Analysis")
+        st.subheader("AI Analysis")
 
         prompt = f"""
         You are helping a school or community event organizer reduce food waste.
@@ -241,7 +261,7 @@ def show_predict():
         Do not decide whether food is safe to donate.
         Do not give food safety guarantees.
 
-        Include:
+        Your answer should include:
         1. Main reasons for the waste.
         2. Practical actions to reduce waste next time.
         3. A short responsible AI and food safety reminder.
@@ -259,13 +279,13 @@ def show_predict():
         Notes: {notes}
         """
 
-        gemini_answer = ask_gemini(prompt)
+        ai_answer = ask_ai(prompt)
 
-        if gemini_answer:
-            st.write(gemini_answer)
+        if ai_answer:
+            st.write(ai_answer)
         else:
             st.info(
-                "Gemini API key is not set yet. The app still works with basic "
+                "Groq API key is not set yet. The app still works with basic "
                 "rule-based analysis."
             )
 
@@ -398,13 +418,13 @@ def show_guide():
         Notes: {notes}
         """
 
-        gemini_answer = ask_gemini(prompt)
+        ai_answer = ask_ai(prompt)
 
-        if gemini_answer:
-            st.write(gemini_answer)
+        if ai_answer:
+            st.write(ai_answer)
         else:
             st.info(
-                "Gemini API key is not set yet. The app still works with basic "
+                "Groq API key is not set yet. The app still works with basic "
                 "rule-based recommendations."
             )
 
