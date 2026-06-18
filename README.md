@@ -21,7 +21,7 @@ Users enter:
 - Weather conditions
 - Notes
    
-The system calculates waste risk and suggest practical action.
+The system calculates waste risk and suggest practical actions.
 
 ## Technology
 - Python
