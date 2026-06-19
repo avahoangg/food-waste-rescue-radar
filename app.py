@@ -134,169 +134,502 @@ def apply_style() -> None:
         """
         <style>
         :root {
-            --bg: #F7F3EA;
-            --panel: #FFFDF7;
-            --panel2: #F1F7EE;
-            --green900: #0E2F21;
-            --green800: #17442F;
-            --green700: #1F5F3E;
-            --green600: #2E7D4F;
-            --sage: #DCE9D7;
-            --sage2: #EEF5EB;
-            --gold: #B7964A;
-            --text: #173528;
-            --muted: #627568;
-            --line: rgba(23, 68, 47, 0.14);
-            --shadow: 0 16px 44px rgba(14, 47, 33, 0.10);
+            --canvas: #F6F1E7;
+            --canvas-2: #EEF6EB;
+            --paper: #FFFDF7;
+            --paper-2: #FAF7EF;
+            --forest: #0E2F21;
+            --forest-2: #17442F;
+            --leaf: #2E7D4F;
+            --leaf-2: #5D9B72;
+            --sage: #DDEBDD;
+            --sage-2: #EEF6EA;
+            --gold: #B9974E;
+            --gold-2: #E2D0A0;
+            --ink: #163427;
+            --muted: #617366;
+            --line: rgba(14, 47, 33, 0.13);
+            --shadow: 0 24px 70px rgba(14, 47, 33, 0.12);
+            --soft-shadow: 0 12px 34px rgba(14, 47, 33, 0.08);
+        }
+
+        @keyframes riseIn {
+            from { opacity: 0; transform: translateY(18px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        @keyframes softGlow {
+            0% { box-shadow: 0 18px 48px rgba(46,125,79,0.12); }
+            50% { box-shadow: 0 24px 72px rgba(46,125,79,0.19); }
+            100% { box-shadow: 0 18px 48px rgba(46,125,79,0.12); }
+        }
+
+        html, body, [class*="css"] {
+            font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
         }
 
         .stApp {
             background:
-                radial-gradient(circle at 12% 4%, rgba(183,150,74,0.12), transparent 30%),
-                radial-gradient(circle at 92% 8%, rgba(46,125,79,0.16), transparent 30%),
-                linear-gradient(135deg, #F7F3EA 0%, #F1F7EE 55%, #E8F2E4 100%);
-            color: var(--text);
+                radial-gradient(circle at 8% 2%, rgba(185,151,78,0.14), transparent 27%),
+                radial-gradient(circle at 92% 6%, rgba(46,125,79,0.15), transparent 30%),
+                linear-gradient(135deg, var(--canvas) 0%, #F7F7EF 40%, var(--canvas-2) 100%);
+            color: var(--ink);
         }
 
         [data-testid="stHeader"] {
-            background: rgba(247, 243, 234, 0.78);
+            background: rgba(246, 241, 231, 0.78);
             backdrop-filter: blur(18px);
-            border-bottom: 1px solid rgba(23, 68, 47, 0.08);
+            border-bottom: 1px solid rgba(14,47,33,0.08);
+        }
+
+        [data-testid="stDecoration"] {
+            background: linear-gradient(90deg, var(--forest), var(--leaf), var(--gold));
         }
 
         .block-container {
-            max-width: 1160px;
-            padding-top: 1.35rem;
-            padding-bottom: 4rem;
+            max-width: 1180px;
+            padding-top: 1.2rem;
+            padding-bottom: 4.5rem;
         }
 
         h1 {
-            color: var(--green900) !important;
-            font-weight: 850 !important;
-            letter-spacing: -0.045em !important;
-            line-height: 1.02 !important;
-            font-size: clamp(2.2rem, 5vw, 4.4rem) !important;
+            color: var(--forest) !important;
+            font-weight: 880 !important;
+            letter-spacing: -0.055em !important;
+            line-height: 0.98 !important;
+            font-size: clamp(2.35rem, 5.4vw, 4.9rem) !important;
         }
 
-        h2, h3 {
-            color: var(--green900) !important;
-            letter-spacing: -0.025em !important;
+        h2 {
+            color: var(--forest) !important;
+            font-weight: 820 !important;
+            letter-spacing: -0.035em !important;
+        }
+
+        h3 {
+            color: var(--forest-2) !important;
+            font-weight: 780 !important;
+            letter-spacing: -0.02em !important;
         }
 
         p, li, label, span, div {
-            color: var(--text);
+            color: var(--ink);
         }
 
         small, .stCaption, [data-testid="stCaptionContainer"] {
             color: var(--muted) !important;
         }
 
+        .lux-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 1rem;
+            padding: 0.82rem 1rem;
+            border-radius: 999px;
+            background: rgba(255,253,247,0.78);
+            border: 1px solid var(--line);
+            box-shadow: var(--soft-shadow);
+            backdrop-filter: blur(20px);
+            margin-bottom: 1.1rem;
+            animation: riseIn .55s ease both;
+        }
+
+        .lux-brand {
+            display: flex;
+            align-items: center;
+            gap: .75rem;
+        }
+
+        .lux-logo {
+            width: 2.25rem;
+            height: 2.25rem;
+            border-radius: 999px;
+            display: grid;
+            place-items: center;
+            background: linear-gradient(135deg, var(--forest), var(--leaf));
+            color: #FFF8E8;
+            box-shadow: 0 12px 26px rgba(46,125,79,.24);
+        }
+
+        .lux-brand-title {
+            font-weight: 850;
+            color: var(--forest);
+            letter-spacing: -0.02em;
+        }
+
+        .lux-brand-sub {
+            color: var(--muted);
+            font-size: .84rem;
+            margin-top: -.08rem;
+        }
+
+        .project-pill {
+            border-radius: 999px;
+            padding: .6rem .88rem;
+            background: linear-gradient(135deg, rgba(46,125,79,.10), rgba(185,151,78,.13));
+            border: 1px solid rgba(46,125,79,.16);
+            color: var(--forest);
+            font-weight: 780;
+            font-size: .9rem;
+        }
+
+        .lux-hero {
+            position: relative;
+            overflow: hidden;
+            border-radius: 38px;
+            padding: clamp(2rem, 4.3vw, 4rem);
+            margin: 1rem 0 1.2rem;
+            background:
+                radial-gradient(circle at 86% 18%, rgba(226,208,160,0.40), transparent 30%),
+                linear-gradient(135deg, rgba(255,253,247,0.94), rgba(239,247,235,0.84));
+            border: 1px solid rgba(14,47,33,.12);
+            box-shadow: var(--shadow);
+            animation: riseIn .65s ease both, softGlow 6s ease-in-out infinite;
+        }
+
+        .lux-hero::after {
+            content: "";
+            position: absolute;
+            right: -100px;
+            bottom: -145px;
+            width: 360px;
+            height: 360px;
+            border-radius: 50%;
+            background: radial-gradient(circle, rgba(46,125,79,.20), transparent 68%);
+            pointer-events: none;
+        }
+
+        .eyebrow {
+            display: inline-flex;
+            align-items: center;
+            gap: .45rem;
+            color: var(--gold);
+            font-size: .78rem;
+            font-weight: 900;
+            letter-spacing: .18em;
+            text-transform: uppercase;
+            margin-bottom: .9rem;
+        }
+
+        .hero-copy {
+            max-width: 760px;
+            color: var(--muted);
+            font-size: clamp(1.05rem, 1.55vw, 1.24rem);
+            line-height: 1.62;
+            margin-top: .75rem;
+        }
+
+        .lux-chip-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: .58rem;
+            margin-top: 1.2rem;
+        }
+
+        .lux-chip {
+            display: inline-flex;
+            align-items: center;
+            gap: .42rem;
+            padding: .58rem .78rem;
+            border-radius: 999px;
+            background: rgba(255,255,255,.72);
+            border: 1px solid rgba(14,47,33,.12);
+            color: var(--forest-2);
+            font-size: .88rem;
+            font-weight: 760;
+            box-shadow: 0 8px 20px rgba(14,47,33,.05);
+        }
+
+        .section-label {
+            margin: 1.5rem 0 .75rem;
+            display: flex;
+            align-items: center;
+            gap: .7rem;
+            animation: riseIn .65s ease both;
+        }
+
+        .section-num {
+            width: 2.1rem;
+            height: 2.1rem;
+            display: grid;
+            place-items: center;
+            border-radius: 999px;
+            color: #FFF8E8;
+            font-weight: 900;
+            background: linear-gradient(135deg, var(--forest), var(--leaf));
+            box-shadow: 0 10px 26px rgba(46,125,79,.20);
+        }
+
+        .feature-grid {
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0,1fr));
+            gap: 1rem;
+            margin: 1rem 0 1.2rem;
+        }
+
+        .feature-card {
+            min-height: 178px;
+            padding: 1.18rem;
+            border-radius: 26px;
+            background: rgba(255,253,247,.82);
+            border: 1px solid rgba(14,47,33,.12);
+            box-shadow: var(--soft-shadow);
+            animation: riseIn .72s ease both;
+        }
+
+        .feature-card:nth-child(2) { animation-delay: .08s; }
+        .feature-card:nth-child(3) { animation-delay: .16s; }
+        .feature-card:nth-child(4) { animation-delay: .24s; }
+        .feature-card:nth-child(5) { animation-delay: .32s; }
+        .feature-card:nth-child(6) { animation-delay: .40s; }
+
+        .feature-icon {
+            width: 2.35rem;
+            height: 2.35rem;
+            border-radius: 16px;
+            display: grid;
+            place-items: center;
+            background: var(--sage-2);
+            color: var(--forest);
+            font-size: 1.1rem;
+            margin-bottom: .85rem;
+        }
+
+        .feature-title {
+            font-size: 1.04rem;
+            color: var(--forest);
+            font-weight: 850;
+            margin-bottom: .34rem;
+        }
+
+        .feature-body {
+            color: var(--muted);
+            line-height: 1.52;
+            font-size: .94rem;
+        }
+
+        .lux-panel {
+            background: rgba(255,253,247,.82);
+            border: 1px solid rgba(14,47,33,.12);
+            border-radius: 28px;
+            padding: 1.35rem;
+            box-shadow: var(--soft-shadow);
+            animation: riseIn .7s ease both;
+            margin-bottom: 1rem;
+        }
+
+        .path-card {
+            background: linear-gradient(135deg, rgba(23,68,47,.95), rgba(46,125,79,.92));
+            border-radius: 30px;
+            padding: 1.45rem;
+            box-shadow: var(--shadow);
+            border: 1px solid rgba(255,255,255,.18);
+            margin: 1rem 0;
+            animation: riseIn .75s ease both;
+        }
+
+        .path-card h3, .path-card p, .path-card li, .path-card span, .path-card div {
+            color: #FFF8E8 !important;
+        }
+
+        .path-card p, .path-card li {
+            opacity: .88;
+        }
+
         div[data-testid="stVerticalBlockBorderWrapper"] {
-            border: 1px solid var(--line) !important;
-            border-radius: 24px !important;
-            background: rgba(255, 253, 247, 0.82) !important;
-            box-shadow: 0 10px 30px rgba(14, 47, 33, 0.07) !important;
+            border: 1px solid rgba(14,47,33,.12) !important;
+            border-radius: 26px !important;
+            background: rgba(255,253,247,.82) !important;
+            box-shadow: var(--soft-shadow) !important;
+            animation: riseIn .58s ease both;
         }
 
         .stButton > button {
-            background: linear-gradient(135deg, #17442F, #2E7D4F) !important;
+            background: linear-gradient(135deg, var(--forest-2), var(--leaf)) !important;
             color: #FFF8E8 !important;
             border: 1px solid rgba(23, 68, 47, .18) !important;
             border-radius: 999px !important;
-            font-weight: 800 !important;
-            min-height: 3.05rem !important;
-            box-shadow: 0 12px 26px rgba(46, 125, 79, 0.22) !important;
-        }
-
-        .stButton > button p,
-        .stButton > button span,
-        .stButton > button div {
-            color: #FFF8E8 !important;
+            font-weight: 850 !important;
+            min-height: 3.1rem !important;
+            box-shadow: 0 13px 28px rgba(46, 125, 79, 0.22) !important;
+            transition: all .18s ease !important;
         }
 
         .stButton > button:hover {
             filter: brightness(1.04);
             transform: translateY(-1px);
+            box-shadow: 0 18px 38px rgba(46,125,79,.28) !important;
+        }
+
+        .stButton > button p, .stButton > button span, .stButton > button div {
+            color: #FFF8E8 !important;
+            font-weight: 850 !important;
         }
 
         div[data-testid="stDownloadButton"] > button {
-            background: linear-gradient(135deg, #B7964A, #DAC58C) !important;
-            color: #173528 !important;
+            background: linear-gradient(135deg, var(--gold), var(--gold-2)) !important;
+            color: var(--forest) !important;
             border-radius: 999px !important;
-            font-weight: 800 !important;
+            font-weight: 850 !important;
             min-height: 3.05rem !important;
-            border: 1px solid rgba(183,150,74,.22) !important;
+            border: 1px solid rgba(185,151,78,.25) !important;
+            box-shadow: 0 12px 26px rgba(185,151,78,.18) !important;
         }
 
         div[data-testid="stDownloadButton"] > button p,
         div[data-testid="stDownloadButton"] > button span {
-            color: #173528 !important;
+            color: var(--forest) !important;
+            font-weight: 850 !important;
         }
 
         div[data-testid="stRadio"] {
-            padding: .38rem .45rem;
-            border: 1px solid var(--line);
+            padding: .4rem .5rem;
+            border: 1px solid rgba(14,47,33,.12);
             border-radius: 999px;
-            background: rgba(255,253,247,.72);
-            box-shadow: 0 8px 20px rgba(14,47,33,.05);
+            background: rgba(255,253,247,.75);
+            box-shadow: 0 8px 22px rgba(14,47,33,.055);
             margin-bottom: 1rem;
         }
 
         div[data-testid="stRadio"] label p {
-            color: var(--green900) !important;
-            font-weight: 750 !important;
-        }
-
-        input, textarea {
-            color: var(--green900) !important;
-        }
-
-        div[data-baseweb="select"] span {
-            color: var(--green900) !important;
+            color: var(--forest) !important;
+            font-weight: 800 !important;
         }
 
         div[data-testid="stTextInput"] input,
         div[data-testid="stNumberInput"] input,
         div[data-testid="stTextArea"] textarea,
         div[data-testid="stSelectbox"] div[data-baseweb="select"] > div {
-            border-radius: 15px !important;
-            border: 1px solid rgba(23, 68, 47, .16) !important;
+            border-radius: 16px !important;
+            border: 1px solid rgba(14,47,33,.16) !important;
             background: #FFFDF7 !important;
+            color: var(--forest) !important;
+            box-shadow: none !important;
+        }
+
+        div[data-baseweb="select"] span,
+        input, textarea {
+            color: var(--forest) !important;
         }
 
         .stMetric {
-            background: #FFFDF7;
-            border: 1px solid rgba(23,68,47,.12);
-            border-radius: 18px;
+            background: rgba(255,253,247,.86);
+            border: 1px solid rgba(14,47,33,.12);
+            border-radius: 20px;
             padding: 1rem;
-            box-shadow: 0 8px 20px rgba(14,47,33,.05);
+            box-shadow: 0 9px 24px rgba(14,47,33,.055);
         }
 
         [data-testid="stMetricLabel"] p {
             color: var(--muted) !important;
-            font-weight: 800 !important;
-            letter-spacing: .05em !important;
+            font-weight: 850 !important;
+            letter-spacing: .06em !important;
             text-transform: uppercase !important;
-            font-size: .75rem !important;
+            font-size: .73rem !important;
         }
 
         [data-testid="stMetricValue"] {
-            color: var(--green900) !important;
-        }
-
-        hr {
-            border-color: rgba(23,68,47,.12);
+            color: var(--forest) !important;
         }
 
         [data-testid="stDataFrame"] {
-            border-radius: 18px;
+            border-radius: 20px;
             overflow: hidden;
-            border: 1px solid rgba(23,68,47,.10);
+            border: 1px solid rgba(14,47,33,.11);
+            box-shadow: var(--soft-shadow);
+        }
+
+        [data-testid="stExpander"] {
+            border-radius: 22px !important;
+            border: 1px solid rgba(14,47,33,.12) !important;
+            background: rgba(255,253,247,.74) !important;
+            box-shadow: 0 8px 20px rgba(14,47,33,.05) !important;
+        }
+
+        div[data-testid="stAlert"] {
+            border-radius: 20px;
+            border: 1px solid rgba(14,47,33,.10);
+            box-shadow: 0 8px 22px rgba(14,47,33,.05);
+        }
+
+        hr {
+            border-color: rgba(14,47,33,.12);
+        }
+
+        @media (max-width: 980px) {
+            .feature-grid { grid-template-columns: repeat(2, minmax(0,1fr)); }
+            .lux-header { border-radius: 24px; flex-direction: column; align-items: flex-start; }
+        }
+
+        @media (max-width: 640px) {
+            .feature-grid { grid-template-columns: 1fr; }
+            .lux-hero { border-radius: 28px; padding: 1.55rem; }
+            h1 { font-size: 2.45rem !important; }
         }
         </style>
         """,
         unsafe_allow_html=True,
     )
+
+
+def lux_hero(title: str, subtitle: str, eyebrow: str = "Food waste intelligence", chips: list[str] | None = None) -> None:
+    chip_html = ""
+    if chips:
+        chip_html = '<div class="lux-chip-row">' + "".join(f'<span class="lux-chip">{chip}</span>' for chip in chips) + "</div>"
+    st.markdown(
+        f"""
+        <div class="lux-hero">
+            <div class="eyebrow">{eyebrow}</div>
+            <h1>{title}</h1>
+            <div class="hero-copy">{subtitle}</div>
+            {chip_html}
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def section_label(number: str, title: str) -> None:
+    st.markdown(
+        f"""
+        <div class="section-label">
+            <div class="section-num">{number}</div>
+            <h2 style="margin:0;">{title}</h2>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def feature_grid(cards: list[tuple[str, str, str]]) -> None:
+    html = '<div class="feature-grid">'
+    for icon, title, body in cards:
+        html += f"""
+        <div class="feature-card">
+            <div class="feature-icon">{icon}</div>
+            <div class="feature-title">{title}</div>
+            <div class="feature-body">{body}</div>
+        </div>
+        """
+    html += "</div>"
+    st.markdown(html, unsafe_allow_html=True)
+
+
+def path_card(title: str, items: list[str]) -> None:
+    list_html = "".join(f"<li>{item}</li>" for item in items)
+    st.markdown(
+        f"""
+        <div class="path-card">
+            <h3>{title}</h3>
+            <p>Use this path for the best demo and the clearest workflow.</p>
+            <ol>{list_html}</ol>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
 
 
 # =============================================================================
@@ -1472,14 +1805,23 @@ def connected_project() -> str | None:
 
 
 def top_header() -> None:
-    c1, c2 = st.columns([1.4, 1])
-    with c1:
-        st.markdown("### 🌿 Food Rescue Radar")
-        st.caption("Find food waste before it happens")
-    with c2:
-        project = connected_project()
-        if project:
-            st.success(f"Project: {project}", icon="📁")
+    project = connected_project()
+    pill = f'<div class="project-pill">Project · {project}</div>' if project else ""
+    st.markdown(
+        f"""
+        <div class="lux-header">
+            <div class="lux-brand">
+                <div class="lux-logo">🌿</div>
+                <div>
+                    <div class="lux-brand-title">Food Rescue Radar</div>
+                    <div class="lux-brand-sub">Plan food better. Waste less.</div>
+                </div>
+            </div>
+            {pill}
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
 
 def metric_grid(items: list[tuple[str, str, str]]) -> None:
@@ -1578,100 +1920,99 @@ def project_gate() -> bool:
     if connected_project():
         return True
 
-    st.title("Food Rescue Radar")
-    st.subheader("Find food waste before it happens")
-    st.write(
-        "Create a project for a cafeteria, club, event, or community group. "
-        "Each project keeps its own forecasts, logs, dashboard, and report."
+    lux_hero(
+        "Start a food rescue project",
+        "Create one project for a cafeteria, club, event team, or community group. The app will keep forecasts, routes, logs, audits, and reports together.",
+        "Welcome",
+        ["Predict waste", "Optimize prep", "Match rescue routes", "Audit root causes"],
     )
 
-    projects = load_projects()
+    section_label("1", "Create or open a project")
+    left, right = st.columns([1.05, 0.95], gap="large")
 
-    with st.container(border=True):
-        st.subheader("Start a project")
-        new_project = st.text_input("Project name", placeholder="Example: Wagner Cafeteria or Green Club Events")
-        if st.button("Create project", use_container_width=True):
-            name = clean_project_name(new_project)
-            if not name:
-                st.error("Please enter a project name.")
-            else:
-                add_project(name)
-                st.session_state.project = name
-                st.rerun()
-
-    if projects:
+    with left:
         with st.container(border=True):
-            st.subheader("Open an existing project")
-            selected = st.selectbox("Choose project", projects)
-            if st.button("Open project", use_container_width=True):
-                st.session_state.project = selected
-                st.rerun()
+            st.subheader("Create a new project")
+            st.caption("Use a simple name that your team will recognize.")
+            new_project = st.text_input("Project name", placeholder="Example: Wagner Cafeteria")
+            if st.button("Create project", use_container_width=True):
+                name = clean_project_name(new_project)
+                if not name:
+                    st.error("Please enter a project name.")
+                else:
+                    add_project(name)
+                    st.session_state.project = name
+                    st.rerun()
 
-    with st.container(border=True):
-        st.subheader("What the app does")
-        c1, c2, c3 = st.columns(3)
-        with c1:
-            st.markdown("**Predict**")
-            st.write("Estimate when and where food waste is likely to happen.")
-        with c2:
-            st.markdown("**Act**")
-            st.write("Get practical steps to reduce, redistribute, or manage leftovers.")
-        with c3:
-            st.markdown("**Learn**")
-            st.write("Find patterns from past events and improve future planning.")
+    with right:
+        projects = load_projects()
+        with st.container(border=True):
+            st.subheader("Open a project")
+            if projects:
+                selected = st.selectbox("Choose project", projects)
+                if st.button("Open project", use_container_width=True):
+                    st.session_state.project = selected
+                    st.rerun()
+            else:
+                st.write("No saved projects yet.")
+
+    section_label("2", "What you can do")
+    feature_grid(
+        [
+            ("🔮", "Forecast waste", "Check if an event is likely to create leftovers before food is prepared."),
+            ("⚖️", "Optimize portions", "Find the best total prep amount and first batch size."),
+            ("🧭", "Route surplus", "Match predicted leftovers to donation, review, pickup, or compost routes."),
+            ("📊", "Find patterns", "See which foods, days, and event types create the most waste."),
+            ("🧪", "Audit causes", "Find the root cause and choose the next best intervention."),
+            ("📄", "Export proof", "Download reports for a school meeting or project submission."),
+        ]
+    )
 
     return False
 
 
 def home_page() -> None:
-    st.title("Food Rescue Radar")
-    st.subheader("Predict waste. Plan smarter. Rescue more food.")
-    st.write(
-        "Use this project to forecast food waste before an event, log real results after the event, "
-        "and learn which meals, days, and plans create the most waste."
+    lux_hero(
+        "Plan food better. Waste less.",
+        "Use this project to predict waste before an event. Then choose a smarter prep plan. After the event, log the result and learn from patterns.",
+        "Project dashboard",
+        ["Simple workflow", "Professional tools", "Student friendly"],
     )
-
-    with st.container(border=True):
-        st.subheader("How students use this app")
-        c1, c2, c3, c4 = st.columns(4)
-        with c1:
-            st.markdown("### 1")
-            st.markdown("**Forecast**")
-            st.write("Enter the food plan before the event.")
-        with c2:
-            st.markdown("### 2")
-            st.markdown("**Take action**")
-            st.write("Use the AI plan to reduce or rescue waste.")
-        with c3:
-            st.markdown("### 3")
-            st.markdown("**Log results**")
-            st.write("Record attendance and leftovers after the event.")
-        with c4:
-            st.markdown("### 4")
-            st.markdown("**Improve**")
-            st.write("Use patterns to plan better next time.")
 
     df = project_data(connected_project())
     df_num = numeric(df, ["Waste Rate", "Leftover Portions", "Cost Impact", "CO2e Impact", "Potential Meals Rescued"])
 
+    section_label("1", "Project snapshot")
     if df_num.empty:
         metric_grid(
             [
                 ("Records", "0", "No logged events yet."),
                 ("Average waste", "—", "Log events to unlock this."),
                 ("Cost impact", "—", "Estimated from leftovers."),
-                ("Meals rescued", "—", "Based on donation route."),
+                ("Meals rescued", "—", "Based on rescue routes."),
             ]
         )
     else:
         metric_grid(
             [
-                ("Records", str(len(df_num)), "Events logged in this project."),
+                ("Records", str(len(df_num)), "Events logged."),
                 ("Average waste", f"{df_num['Waste Rate'].mean():.1f}%", "Average leftover rate."),
-                ("Cost impact", f"${df_num['Cost Impact'].sum():.0f}", "Estimated value of wasted portions."),
-                ("Meals rescued", f"{df_num['Potential Meals Rescued'].sum():.0f}", "Potential portions rescued."),
+                ("Cost impact", f"${df_num['Cost Impact'].sum():.0f}", "Estimated waste cost."),
+                ("Meals rescued", f"{df_num['Potential Meals Rescued'].sum():.0f}", "Potential rescued portions."),
             ]
         )
+
+    section_label("2", "Choose a tool")
+    feature_grid(
+        [
+            ("🔮", "Forecast", "Use before ordering or cooking. Predict waste risk and get actions."),
+            ("⚖️", "Prep Optimizer", "Use for bigger events. Simulate demand and choose a better prep plan."),
+            ("🧪", "Waste Audit Lab", "Use after you have records. Find root causes and best interventions."),
+            ("🧭", "Rescue Board", "Save donation, pickup, staff review, and compost routes."),
+            ("📊", "Dashboard", "View trends by food, day, event type, risk, and intervention."),
+            ("📄", "Report", "Export data and a clean project summary."),
+        ]
+    )
 
     b1, b2, b3, b4, b5 = st.columns(5)
     with b1:
@@ -1695,6 +2036,18 @@ def home_page() -> None:
             st.session_state.page = "Dashboard"
             st.rerun()
 
+    section_label("3", "Best demo path")
+    path_card(
+        "Show the app like a polished product",
+        [
+            "Add sample records and rescue routes.",
+            "Open Waste Audit Lab to show root causes.",
+            "Open Prep Optimizer to show the recommended prep plan.",
+            "Open Forecast to show risk and rescue route match.",
+            "Open Dashboard to show patterns and impact.",
+        ],
+    )
+
     if st.button("Add sample records and rescue routes", use_container_width=True):
         reset_project_records(connected_project())
         reset_project_routes(connected_project())
@@ -1706,26 +2059,17 @@ def home_page() -> None:
         route_sample = sample_routes(connected_project())
         route_full = pd.concat([route_full[route_full["Project"] != connected_project()], route_sample], ignore_index=True)
         save_routes(route_full)
-        st.success("Sample records and rescue routes added to this project.")
+        st.success("Sample records and rescue routes were added.")
         st.rerun()
-
-    with st.container(border=True):
-        st.subheader("What this project helps you do")
-        c1, c2, c3 = st.columns(3)
-        with c1:
-            st.markdown("**Predict risk**")
-            st.write("See when and where food waste is likely before food is prepared.")
-        with c2:
-            st.markdown("**Optimize preparation**")
-            st.write("Use simulation to choose total portions, first batch, and hold-back amount.")
-        with c3:
-            st.markdown("**Audit root causes**")
-            st.write("Find why waste happens and choose the next best intervention.")
 
 
 def forecast_page() -> None:
-    st.title("Forecast food waste")
-    st.write("Use this before food is ordered, cooked, or served.")
+    lux_hero(
+        "Forecast food waste",
+        "Use this before food is ordered, cooked, or served. The app will estimate risk and suggest practical next steps.",
+        "Before the event",
+        ["Risk score", "Rescue route match", "Action plan"],
+    )
 
     event = collect_event_form("forecast", include_actual=False)
 
@@ -1884,8 +2228,12 @@ def forecast_page() -> None:
 
 
 def log_page() -> None:
-    st.title("Log the real result")
-    st.write("Use this after the event. Real results make the dashboard and predictions smarter.")
+    lux_hero(
+        "Log the real result",
+        "Use this after an event. Save attendance, prepared portions, and leftovers so the project can learn.",
+        "After the event",
+        ["Actual attendance", "Leftovers", "Impact receipt"],
+    )
 
     event = collect_event_form("log", include_actual=True)
 
@@ -1934,8 +2282,12 @@ def log_page() -> None:
 
 
 def dashboard_page() -> None:
-    st.title("Dashboard")
-    st.write("Find patterns that explain when and where food waste happens.")
+    lux_hero(
+        "Dashboard",
+        "See the patterns behind food waste. Find high-waste foods, risky days, and useful interventions.",
+        "Impact intelligence",
+        ["Trends", "Risk mix", "Food patterns"],
+    )
 
     df = project_data(connected_project())
     if df.empty:
@@ -2093,9 +2445,11 @@ def dashboard_page() -> None:
 
 
 def waste_audit_lab_page() -> None:
-    st.title("Waste Audit Lab")
-    st.write(
-        "Use this like a professional waste audit. It finds root causes, ranks interventions, estimates potential savings, and creates a 30-day improvement experiment."
+    lux_hero(
+        "Waste Audit Lab",
+        "Use this after logging results. It finds the root cause of waste and recommends the next best action.",
+        "Professional audit",
+        ["Root causes", "Intervention ROI", "30-day experiment"],
     )
 
     project = connected_project()
@@ -2296,9 +2650,11 @@ def waste_audit_lab_page() -> None:
 
 
 def prep_optimizer_page() -> None:
-    st.title("Prep Optimizer")
-    st.write(
-        "Use this before a larger event. The optimizer simulates many possible attendance outcomes and finds a preparation plan that balances waste, shortage risk, cost, carbon impact, and rescue capacity."
+    lux_hero(
+        "Prep Optimizer",
+        "Use this before a larger event. The optimizer tests many attendance outcomes and finds a smarter prep plan.",
+        "Advanced planning",
+        ["Monte Carlo simulation", "First batch plan", "Shortage tradeoff"],
     )
 
     event = collect_event_form("optimizer", include_actual=False)
@@ -2462,10 +2818,11 @@ def prep_optimizer_page() -> None:
             )
 
 def rescue_board_page() -> None:
-    st.title("Rescue Board")
-    st.write(
-        "Save the people, teams, and programs that can help manage surplus food. "
-        "Forecasts use this board to recommend the best rescue route before leftovers appear."
+    lux_hero(
+        "Rescue Board",
+        "Save the teams and programs that can help manage surplus food. Forecasts use this board to match leftovers to a route.",
+        "Surplus routing",
+        ["Donation", "Pickup", "Staff review", "Compost"],
     )
 
     project = connected_project()
@@ -2583,8 +2940,12 @@ def report_text(df: pd.DataFrame, project: str) -> str:
 
 
 def report_page() -> None:
-    st.title("Report")
-    st.write("Download your project data and a simple impact report.")
+    lux_hero(
+        "Report",
+        "Download your data and a clean impact summary for meetings, judging, or school presentations.",
+        "Export center",
+        ["CSV", "Impact report", "Audit proof"],
+    )
 
     project = connected_project()
     df = project_data(project)
@@ -2618,8 +2979,12 @@ def report_page() -> None:
 
 
 def project_settings_page() -> None:
-    st.title("Project settings")
-    st.write("Manage the current project.")
+    lux_hero(
+        "Project settings",
+        "Manage the current project and switch to another project when needed.",
+        "Settings",
+        ["Project data", "Reset records", "Switch project"],
+    )
 
     project = connected_project()
 
