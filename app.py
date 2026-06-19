@@ -1145,6 +1145,325 @@ def optimize_prep_plan(event: dict[str, Any], history: pd.DataFrame, routes: pd.
     }
 
 
+
+# =============================================================================
+# Waste Audit Lab
+# =============================================================================
+def root_cause_for_row(row: pd.Series) -> dict[str, Any]:
+    expected = max(float(row.get("Expected Attendance", 0) or 0), 1)
+    actual = float(row.get("Actual Attendance", 0) or 0)
+    prepared = max(float(row.get("Food Prepared", 0) or 0), 1)
+    leftover = max(float(row.get("Leftover Portions", 0) or 0), 0)
+    waste_rate = float(row.get("Waste Rate", 0) or 0)
+    popularity = float(row.get("Menu Popularity", 3) or 3)
+    weather = str(row.get("Weather", "Normal"))
+    intervention = str(row.get("Intervention", "None yet"))
+    donation = str(row.get("Donation Route", "No"))
+    rescued = float(row.get("Potential Meals Rescued", 0) or 0)
+
+    attendance_gap_rate = max(expected - actual, 0) / expected
+    overproduction_rate = max(prepared - expected, prepared - actual, 0) / prepared
+    leftover_rate = leftover / prepared
+
+    scores = {
+        "Attendance variance": attendance_gap_rate * 100 + (10 if str(row.get("Attendance Confidence", "")) == "Low" else 0),
+        "Overproduction": overproduction_rate * 75 + max(prepared - expected, 0) / expected * 30,
+        "Menu acceptance": max(0, 3 - popularity) * 18 + waste_rate * 0.22,
+        "Weather disruption": (18 if weather in ["Rainy", "Stormy", "Very hot", "Very cold"] else 0) + attendance_gap_rate * 35,
+        "Rescue capacity gap": (max(leftover - rescued, 0) / max(leftover, 1)) * 45 if leftover > 0 else 0,
+        "No active intervention": 25 if intervention == "None yet" and waste_rate >= 12 else 0,
+    }
+
+    if donation == "Yes":
+        scores["Rescue capacity gap"] -= 8
+    if intervention != "None yet":
+        scores["No active intervention"] = 0
+
+    primary = max(scores, key=scores.get)
+    confidence = "High" if scores[primary] >= 45 else "Medium" if scores[primary] >= 25 else "Low"
+
+    evidence_map = {
+        "Attendance variance": f"Expected {expected:.0f} people but logged {actual:.0f}; attendance gap is {attendance_gap_rate:.0%}.",
+        "Overproduction": f"Prepared {prepared:.0f} portions for {actual:.0f} actual attendees.",
+        "Menu acceptance": f"Menu popularity is {popularity:.0f}/5 with {waste_rate:.1f}% waste.",
+        "Weather disruption": f"Condition was {weather}, which can affect turnout and appetite.",
+        "Rescue capacity gap": f"{max(leftover - rescued, 0):.0f} leftover portions were not matched to a rescue route.",
+        "No active intervention": "No intervention was recorded for a moderate or high-waste event.",
+    }
+
+    return {
+        "Primary Cause": primary,
+        "Cause Score": round(float(scores[primary]), 1),
+        "Confidence": confidence,
+        "Evidence": evidence_map.get(primary, "Root cause detected from event signals."),
+    }
+
+
+def build_root_cause_audit(df: pd.DataFrame) -> pd.DataFrame:
+    if df.empty:
+        return pd.DataFrame()
+
+    df = numeric(
+        df.copy(),
+        [
+            "Expected Attendance",
+            "Actual Attendance",
+            "Food Prepared",
+            "Leftover Portions",
+            "Waste Rate",
+            "Cost Impact",
+            "CO2e Impact",
+            "Menu Popularity",
+            "Potential Meals Rescued",
+        ],
+    )
+
+    rows = []
+    for idx, row in df.iterrows():
+        cause = root_cause_for_row(row)
+        rows.append(
+            {
+                "Event Name": row.get("Event Name", ""),
+                "Food": row.get("Food", ""),
+                "Day": row.get("Day", ""),
+                "Waste Rate": round(float(row.get("Waste Rate", 0) or 0), 1),
+                "Leftover Portions": round(float(row.get("Leftover Portions", 0) or 0), 1),
+                "Cost Impact": round(float(row.get("Cost Impact", 0) or 0), 2),
+                "CO2e Impact": round(float(row.get("CO2e Impact", 0) or 0), 2),
+                "Intervention": row.get("Intervention", ""),
+                **cause,
+            }
+        )
+    return pd.DataFrame(rows)
+
+
+def root_cause_summary(audit: pd.DataFrame) -> pd.DataFrame:
+    if audit.empty:
+        return pd.DataFrame()
+    summary = (
+        audit.groupby("Primary Cause")
+        .agg(
+            Events=("Event Name", "count"),
+            Waste_Portions=("Leftover Portions", "sum"),
+            Cost_Impact=("Cost Impact", "sum"),
+            CO2e_Impact=("CO2e Impact", "sum"),
+            Avg_Waste_Rate=("Waste Rate", "mean"),
+            Avg_Cause_Score=("Cause Score", "mean"),
+        )
+        .reset_index()
+        .sort_values("Waste_Portions", ascending=False)
+    )
+    total = max(float(summary["Waste_Portions"].sum()), 1)
+    summary["Share of Waste %"] = (summary["Waste_Portions"] / total * 100).round(1)
+    summary["Cumulative %"] = summary["Share of Waste %"].cumsum().round(1)
+    return summary
+
+
+def intervention_roi(df: pd.DataFrame) -> pd.DataFrame:
+    if df.empty:
+        return pd.DataFrame()
+
+    df = numeric(df.copy(), ["Waste Rate", "Food Prepared", "Cost per Portion", "CO2e per Portion"])
+    valid = df.dropna(subset=["Waste Rate", "Food Prepared"])
+    if valid.empty:
+        return pd.DataFrame()
+
+    none = valid[valid["Intervention"] == "None yet"]
+    baseline = float(none["Waste Rate"].mean()) if len(none) >= 2 else float(valid["Waste Rate"].mean())
+    avg_cost = float(valid["Cost per Portion"].dropna().mean()) if not valid["Cost per Portion"].dropna().empty else 2.5
+    avg_co2 = float(valid["CO2e per Portion"].dropna().mean()) if not valid["CO2e per Portion"].dropna().empty else 0.5
+
+    rows = []
+    for intervention, group in valid.groupby("Intervention"):
+        count = len(group)
+        avg_waste = float(group["Waste Rate"].mean())
+        mean_prepared = float(group["Food Prepared"].mean())
+        reduction = baseline - avg_waste
+        saved_portions = max(reduction, 0) / 100 * mean_prepared * count
+        confidence = "High" if count >= 5 else "Medium" if count >= 3 else "Low"
+
+        rows.append(
+            {
+                "Intervention": intervention,
+                "Events": count,
+                "Avg Waste Rate": round(avg_waste, 1),
+                "Baseline Waste Rate": round(baseline, 1),
+                "Estimated Reduction": round(reduction, 1),
+                "Estimated Portions Saved": round(saved_portions, 1),
+                "Estimated Cost Saved": round(saved_portions * avg_cost, 2),
+                "Estimated CO2e Avoided": round(saved_portions * avg_co2, 2),
+                "Confidence": confidence,
+            }
+        )
+
+    return pd.DataFrame(rows).sort_values(["Estimated Portions Saved", "Events"], ascending=False)
+
+
+def next_best_actions(summary: pd.DataFrame, roi: pd.DataFrame, routes: pd.DataFrame) -> pd.DataFrame:
+    if summary.empty:
+        return pd.DataFrame()
+
+    cause_impact = {row["Primary Cause"]: float(row["Waste_Portions"]) for _, row in summary.iterrows()}
+    total_waste = max(sum(cause_impact.values()), 1)
+
+    ideas = [
+        {
+            "Action": "Require attendance confirmation 24 hours before food prep",
+            "Targets": "Attendance variance",
+            "Effort": 2,
+            "Why": "Reduces uncertainty before ordering or cooking.",
+        },
+        {
+            "Action": "Use smaller first batch with a service checkpoint",
+            "Targets": "Overproduction",
+            "Effort": 3,
+            "Why": "Keeps food flexible until turnout is clear.",
+        },
+        {
+            "Action": "Run a menu preference survey before repeating low-score meals",
+            "Targets": "Menu acceptance",
+            "Effort": 2,
+            "Why": "Finds unpopular meals before they become leftovers.",
+        },
+        {
+            "Action": "Build a weather adjustment rule for outdoor or Friday events",
+            "Targets": "Weather disruption",
+            "Effort": 3,
+            "Why": "Adjusts production when conditions change demand.",
+        },
+        {
+            "Action": "Add or expand rescue routes with capacity and response time",
+            "Targets": "Rescue capacity gap",
+            "Effort": 3 if routes.empty else 2,
+            "Why": "Turns leftovers into a planned route instead of a last-minute decision.",
+        },
+        {
+            "Action": "Assign one intervention owner for each high-risk event",
+            "Targets": "No active intervention",
+            "Effort": 1,
+            "Why": "Makes prevention part of the event workflow.",
+        },
+    ]
+
+    rows = []
+    for idea in ideas:
+        impact = cause_impact.get(idea["Targets"], 0)
+        impact_share = impact / total_waste * 100
+        priority = impact_share * 1.15 - idea["Effort"] * 6
+
+        # Lift priority when past data shows the same intervention is promising.
+        if not roi.empty:
+            if "attendance" in idea["Action"].lower():
+                match = roi[roi["Intervention"].str.contains("Attendance", case=False, na=False)]
+            elif "batch" in idea["Action"].lower():
+                match = roi[roi["Intervention"].str.contains("batch", case=False, na=False)]
+            elif "menu" in idea["Action"].lower():
+                match = roi[roi["Intervention"].str.contains("Menu", case=False, na=False)]
+            elif "rescue" in idea["Action"].lower():
+                match = roi[roi["Intervention"].str.contains("Donation", case=False, na=False)]
+            else:
+                match = pd.DataFrame()
+
+            if not match.empty and float(match["Estimated Portions Saved"].max()) > 0:
+                priority += 10
+
+        rows.append(
+            {
+                "Recommended Action": idea["Action"],
+                "Targets": idea["Targets"],
+                "Waste Share Addressed %": round(impact_share, 1),
+                "Effort 1-5": idea["Effort"],
+                "Priority Score": round(float(priority), 1),
+                "Why it matters": idea["Why"],
+            }
+        )
+
+    return pd.DataFrame(rows).sort_values("Priority Score", ascending=False)
+
+
+def experiment_card(project: str, action: str, target_cause: str, target_reduction: int, events: int) -> str:
+    return f"""# 30-Day Waste Reduction Experiment
+
+Project: {project}
+
+## Experiment Focus
+Target cause: {target_cause}
+
+Action to test: {action}
+
+## Hypothesis
+If the team uses this action consistently, food waste connected to {target_cause.lower()} will decrease by at least {target_reduction}% over the next {events} logged events.
+
+## Setup
+1. Choose the next {events} events where this action is realistic.
+2. Use Forecast or Prep Optimizer before each event.
+3. Apply the action before or during service.
+4. Log actual attendance, prepared portions, and leftovers after each event.
+5. Compare the average waste rate against the project baseline.
+
+## Success Metric
+Primary metric: waste rate %
+
+Secondary metrics:
+- leftover portions
+- cost impact
+- CO2e impact
+- rescued portions
+
+## Review Question
+Did this action reduce waste enough to become a standard operating procedure?
+
+Responsible note: Food safety decisions must stay with trained staff and local rules.
+"""
+
+
+def audit_report_text(project: str, summary: pd.DataFrame, actions: pd.DataFrame, roi: pd.DataFrame) -> str:
+    lines = [
+        "# Waste Audit Lab Report",
+        "",
+        f"Project: {project}",
+        f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M')}",
+        "",
+        "## Root Cause Summary",
+    ]
+
+    if summary.empty:
+        lines.append("No root cause data available.")
+    else:
+        for _, row in summary.head(6).iterrows():
+            lines.append(
+                f"- {row['Primary Cause']}: {row['Waste_Portions']:.0f} portions "
+                f"({row['Share of Waste %']:.1f}% of waste), avg waste {row['Avg_Waste_Rate']:.1f}%"
+            )
+
+    lines.append("")
+    lines.append("## Highest Priority Actions")
+    if actions.empty:
+        lines.append("No action ranking available.")
+    else:
+        for _, row in actions.head(5).iterrows():
+            lines.append(
+                f"- {row['Recommended Action']} | Targets: {row['Targets']} | "
+                f"Priority: {row['Priority Score']:.1f}"
+            )
+
+    lines.append("")
+    lines.append("## Intervention Signals")
+    if roi.empty:
+        lines.append("No intervention comparison available.")
+    else:
+        for _, row in roi.head(5).iterrows():
+            lines.append(
+                f"- {row['Intervention']}: avg waste {row['Avg Waste Rate']:.1f}%, "
+                f"estimated saved portions {row['Estimated Portions Saved']:.1f}, confidence {row['Confidence']}"
+            )
+
+    lines.append("")
+    lines.append("Responsible note: This report supports planning and audit review only. Food safety decisions must be made by trained staff.")
+
+    return "\n".join(lines)
+
+
 # =============================================================================
 # Interface helpers
 # =============================================================================
@@ -1354,20 +1673,24 @@ def home_page() -> None:
             ]
         )
 
-    b1, b2, b3, b4 = st.columns(4)
+    b1, b2, b3, b4, b5 = st.columns(5)
     with b1:
         if st.button("Forecast", use_container_width=True):
             st.session_state.page = "Forecast"
             st.rerun()
     with b2:
-        if st.button("Prep Optimizer", use_container_width=True):
+        if st.button("Optimizer", use_container_width=True):
             st.session_state.page = "Prep Optimizer"
             st.rerun()
     with b3:
+        if st.button("Waste Lab", use_container_width=True):
+            st.session_state.page = "Waste Audit Lab"
+            st.rerun()
+    with b4:
         if st.button("Rescue Board", use_container_width=True):
             st.session_state.page = "Rescue Board"
             st.rerun()
-    with b4:
+    with b5:
         if st.button("Dashboard", use_container_width=True):
             st.session_state.page = "Dashboard"
             st.rerun()
@@ -1396,8 +1719,8 @@ def home_page() -> None:
             st.markdown("**Optimize preparation**")
             st.write("Use simulation to choose total portions, first batch, and hold-back amount.")
         with c3:
-            st.markdown("**Route surplus**")
-            st.write("Match predicted leftovers to donation, pickup, review, or compost routes.")
+            st.markdown("**Audit root causes**")
+            st.write("Find why waste happens and choose the next best intervention.")
 
 
 def forecast_page() -> None:
@@ -1769,6 +2092,209 @@ def dashboard_page() -> None:
     st.dataframe(df[show_cols].tail(15), use_container_width=True)
 
 
+def waste_audit_lab_page() -> None:
+    st.title("Waste Audit Lab")
+    st.write(
+        "Use this like a professional waste audit. It finds root causes, ranks interventions, estimates potential savings, and creates a 30-day improvement experiment."
+    )
+
+    project = connected_project()
+    df = project_data(project)
+
+    if df.empty:
+        st.warning("No logged records yet. Add sample records from Home or log real event results first.")
+        return
+
+    df = numeric(
+        df,
+        [
+            "Waste Rate",
+            "Leftover Portions",
+            "Cost Impact",
+            "CO2e Impact",
+            "Potential Meals Rescued",
+            "Food Prepared",
+            "Expected Attendance",
+            "Actual Attendance",
+            "Menu Popularity",
+            "Cost per Portion",
+            "CO2e per Portion",
+        ],
+    )
+
+    audit = build_root_cause_audit(df)
+    summary = root_cause_summary(audit)
+    roi = intervention_roi(df)
+    routes = project_routes(project)
+    actions = next_best_actions(summary, roi, routes)
+
+    if summary.empty:
+        st.warning("Not enough usable records for audit analysis.")
+        return
+
+    top_cause = summary.iloc[0]
+    best_action = actions.iloc[0] if not actions.empty else None
+    best_roi = roi[roi["Intervention"] != "None yet"].head(1)
+
+    metric_grid(
+        [
+            ("Top root cause", str(top_cause["Primary Cause"]), "Largest share of leftover portions."),
+            ("Waste share", f"{top_cause['Share of Waste %']:.1f}%", "Share from the top cause."),
+            ("Cost tied to top cause", f"${top_cause['Cost_Impact']:.0f}", "Estimated cost impact."),
+            ("Audit confidence", "Ready" if len(df) >= 8 else "Early", "More records improve confidence."),
+        ]
+    )
+
+    st.header("Root cause Pareto")
+    st.write("The first bars show where the biggest waste reduction opportunity is.")
+
+    if PLOTLY_OK:
+        fig = go.Figure()
+        fig.add_trace(
+            go.Bar(
+                x=summary["Primary Cause"],
+                y=summary["Waste_Portions"],
+                name="Waste portions",
+                marker_color="#2E7D4F",
+            )
+        )
+        fig.add_trace(
+            go.Scatter(
+                x=summary["Primary Cause"],
+                y=summary["Cumulative %"],
+                name="Cumulative %",
+                yaxis="y2",
+                line=dict(color="#B7964A", width=4),
+                mode="lines+markers",
+            )
+        )
+        fig.update_layout(
+            height=390,
+            margin=dict(l=10, r=10, t=30, b=10),
+            paper_bgcolor="rgba(0,0,0,0)",
+            plot_bgcolor="rgba(255,253,247,.72)",
+            font=dict(color="#173528"),
+            yaxis=dict(title="Leftover portions"),
+            yaxis2=dict(title="Cumulative %", overlaying="y", side="right", range=[0, 105]),
+            legend=dict(orientation="h"),
+        )
+        st.plotly_chart(fig, use_container_width=True)
+    else:
+        st.bar_chart(summary.set_index("Primary Cause")["Waste_Portions"])
+
+    st.dataframe(
+        summary[
+            [
+                "Primary Cause",
+                "Events",
+                "Waste_Portions",
+                "Share of Waste %",
+                "Cost_Impact",
+                "CO2e_Impact",
+                "Avg_Waste_Rate",
+                "Avg_Cause_Score",
+            ]
+        ],
+        use_container_width=True,
+    )
+
+    st.header("Next-best actions")
+    st.write("This ranks actions by how much waste they can address and how hard they are to implement.")
+    st.dataframe(actions, use_container_width=True)
+
+    st.header("Intervention ROI")
+    st.write("This compares each intervention against the project baseline. Treat low-confidence rows as early signals, not final proof.")
+    st.dataframe(roi, use_container_width=True)
+
+    if PLOTLY_OK and not roi.empty:
+        plot_roi = roi[roi["Intervention"] != "None yet"].copy()
+        if not plot_roi.empty:
+            fig2 = px.scatter(
+                plot_roi,
+                x="Estimated Cost Saved",
+                y="Estimated CO2e Avoided",
+                size="Estimated Portions Saved",
+                color="Confidence",
+                hover_name="Intervention",
+                color_discrete_map={"Low": "#B7964A", "Medium": "#2E7D4F", "High": "#17442F"},
+            )
+            fig2.update_layout(
+                height=360,
+                margin=dict(l=10, r=10, t=30, b=10),
+                paper_bgcolor="rgba(0,0,0,0)",
+                plot_bgcolor="rgba(255,253,247,.72)",
+                font=dict(color="#173528"),
+            )
+            st.plotly_chart(fig2, use_container_width=True)
+
+    st.header("Event-level audit")
+    st.dataframe(
+        audit[
+            [
+                "Event Name",
+                "Food",
+                "Day",
+                "Waste Rate",
+                "Leftover Portions",
+                "Primary Cause",
+                "Confidence",
+                "Evidence",
+                "Intervention",
+            ]
+        ],
+        use_container_width=True,
+    )
+
+    st.header("30-day experiment planner")
+    if not actions.empty:
+        default_action = actions.iloc[0]["Recommended Action"]
+        default_cause = actions.iloc[0]["Targets"]
+    else:
+        default_action = "Use smaller first batch with a service checkpoint"
+        default_cause = str(top_cause["Primary Cause"])
+
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        selected_cause = st.selectbox(
+            "Target cause",
+            summary["Primary Cause"].tolist(),
+            index=summary["Primary Cause"].tolist().index(default_cause) if default_cause in summary["Primary Cause"].tolist() else 0,
+        )
+    with c2:
+        target_reduction = st.slider("Target reduction", 5, 40, 15, step=5)
+    with c3:
+        event_count = st.slider("Events to test", 2, 12, 4)
+
+    action_options = actions["Recommended Action"].tolist() if not actions.empty else [default_action]
+    selected_action = st.selectbox(
+        "Action to test",
+        action_options,
+        index=action_options.index(default_action) if default_action in action_options else 0,
+    )
+
+    card = experiment_card(project, selected_action, selected_cause, target_reduction, event_count)
+
+    st.download_button(
+        "Download 30-day experiment card",
+        data=card.encode("utf-8"),
+        file_name=f"{project.replace(' ', '_').lower()}_experiment_card.md",
+        mime="text/markdown",
+        use_container_width=True,
+    )
+
+    st.text_area("Experiment preview", card, height=360)
+
+    st.header("Audit report")
+    report = audit_report_text(project, summary, actions, roi)
+    st.download_button(
+        "Download audit report",
+        data=report.encode("utf-8"),
+        file_name=f"{project.replace(' ', '_').lower()}_waste_audit_report.md",
+        mime="text/markdown",
+        use_container_width=True,
+    )
+
+
 def prep_optimizer_page() -> None:
     st.title("Prep Optimizer")
     st.write(
@@ -2128,7 +2654,7 @@ def main() -> None:
     if not project_gate():
         return
 
-    pages = ["Home", "Forecast", "Prep Optimizer", "Rescue Board", "Log Result", "Dashboard", "Report", "Project Settings"]
+    pages = ["Home", "Forecast", "Prep Optimizer", "Waste Audit Lab", "Rescue Board", "Log Result", "Dashboard", "Report", "Project Settings"]
     current = st.session_state.page if st.session_state.page in pages else "Home"
     page = st.radio("Navigation", pages, index=pages.index(current), horizontal=True, label_visibility="collapsed")
     st.session_state.page = page
@@ -2139,6 +2665,8 @@ def main() -> None:
         forecast_page()
     elif page == "Prep Optimizer":
         prep_optimizer_page()
+    elif page == "Waste Audit Lab":
+        waste_audit_lab_page()
     elif page == "Rescue Board":
         rescue_board_page()
     elif page == "Log Result":
