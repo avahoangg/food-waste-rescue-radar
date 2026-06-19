@@ -780,7 +780,7 @@ def connected_project() -> str | None:
 
 
 def top_header() -> None:
-    c1, c2, c3 = st.columns([1.5, 1, 1])
+    c1, c2 = st.columns([1.4, 1])
     with c1:
         st.markdown("### 🌿 Food Rescue Radar")
         st.caption("Find food waste before it happens")
@@ -788,11 +788,6 @@ def top_header() -> None:
         project = connected_project()
         if project:
             st.success(f"Project: {project}", icon="📁")
-    with c3:
-        if groq_is_connected():
-            st.success("AI Advisor connected", icon="✨")
-        else:
-            st.warning("AI key needed", icon="🔑")
 
 
 def metric_grid(items: list[tuple[str, str, str]]) -> None:
@@ -1006,14 +1001,10 @@ def home_page() -> None:
             st.rerun()
 
     with st.container(border=True):
-        st.subheader("AI in this app")
-        if groq_is_connected():
-            st.success("AI Advisor is connected. Forecasts will include a custom AI action plan.")
-        else:
-            st.warning("AI Advisor needs a Groq API key. The forecast engine will still show risk scores, but the written AI plan needs the key.")
+        st.subheader("Project goal")
         st.write(
-            "The app uses an AI-style forecast engine to score risk from attendance, food amount, weather, menu popularity, and project history. "
-            "When the Groq key is connected, it also writes a custom prevention and rescue plan."
+            "Use this project to predict when food waste is likely to happen, identify patterns from past results, "
+            "and choose realistic actions to reduce, redistribute, or better manage leftovers."
         )
 
 
@@ -1143,7 +1134,7 @@ def forecast_page() -> None:
         if ai_text:
             st.info(ai_text)
         else:
-            st.error("AI Advisor is not connected yet. Add GROQ_API_KEY in Streamlit Secrets, then redeploy the app.")
+            st.warning("AI action plan is unavailable right now. The forecast, risk score, simulator, and dashboard are still available.")
 
 
 def log_page() -> None:
