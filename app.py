@@ -44,6 +44,7 @@ st.set_page_config(
 
 DATA_FILE = Path("food_waste_records.csv")
 PROJECT_FILE = Path("projects.json")
+ROUTE_FILE = Path("rescue_routes.json")
 
 EVENT_TYPES = [
     "School lunch",
@@ -79,6 +80,17 @@ INTERVENTIONS = [
     "Compost plan ready",
     "Mixed plan",
 ]
+
+ROUTE_TYPES = [
+    "Donation partner",
+    "Student club pickup",
+    "Staff meal review",
+    "Community fridge",
+    "Compost program",
+    "Animal feed partner",
+]
+
+FOOD_FORMS = ["Prepared meals", "Packaged snacks", "Bakery items", "Produce", "Mixed food"]
 
 COLUMNS = [
     "Project",
@@ -355,6 +367,197 @@ def reset_project_records(project: str) -> None:
     if not df.empty:
         df = df[df["Project"] != project]
         save_data(df)
+
+
+def load_routes() -> pd.DataFrame:
+    columns = [
+        "Project",
+        "Route Name",
+        "Route Type",
+        "Contact",
+        "Capacity",
+        "Pickup Minutes",
+        "Food Form",
+        "Notes",
+    ]
+    if not ROUTE_FILE.exists():
+        return pd.DataFrame(columns=columns)
+    try:
+        data = json.loads(ROUTE_FILE.read_text(encoding="utf-8"))
+        df = pd.DataFrame(data)
+    except Exception:
+        return pd.DataFrame(columns=columns)
+
+    for col in columns:
+        if col not in df.columns:
+            df[col] = np.nan
+    return df[columns]
+
+
+def save_routes(df: pd.DataFrame) -> None:
+    df.to_json(ROUTE_FILE, orient="records", indent=2)
+
+
+def project_routes(project: str) -> pd.DataFrame:
+    routes = load_routes()
+    if routes.empty:
+        return routes
+    return routes[routes["Project"] == project].copy()
+
+
+def add_route(route: dict[str, Any]) -> None:
+    routes = load_routes()
+    routes = pd.concat([routes, pd.DataFrame([route])], ignore_index=True)
+    save_routes(routes)
+
+
+def reset_project_routes(project: str) -> None:
+    routes = load_routes()
+    if not routes.empty:
+        routes = routes[routes["Project"] != project]
+        save_routes(routes)
+
+
+def sample_routes(project: str) -> pd.DataFrame:
+    rows = [
+        {
+            "Project": project,
+            "Route Name": "Student Council Snack Table",
+            "Route Type": "Student club pickup",
+            "Contact": "student.council@school.ca",
+            "Capacity": 25,
+            "Pickup Minutes": 15,
+            "Food Form": "Packaged snacks",
+            "Notes": "Good for unopened snacks, fruit cups, and packaged bakery items.",
+        },
+        {
+            "Project": project,
+            "Route Name": "Community Pantry Review",
+            "Route Type": "Donation partner",
+            "Contact": "pantry@example.org",
+            "Capacity": 50,
+            "Pickup Minutes": 45,
+            "Food Form": "Packaged snacks",
+            "Notes": "Use only after trained staff confirm donation rules and packaging.",
+        },
+        {
+            "Project": project,
+            "Route Name": "Staff Meal Review",
+            "Route Type": "Staff meal review",
+            "Contact": "cafeteria.manager@school.ca",
+            "Capacity": 20,
+            "Pickup Minutes": 10,
+            "Food Form": "Prepared meals",
+            "Notes": "Internal review route for appropriate leftovers.",
+        },
+        {
+            "Project": project,
+            "Route Name": "Green Team Compost",
+            "Route Type": "Compost program",
+            "Contact": "green.team@school.ca",
+            "Capacity": 100,
+            "Pickup Minutes": 30,
+            "Food Form": "Mixed food",
+            "Notes": "Fallback route for food that cannot be redistributed.",
+        },
+    ]
+    return pd.DataFrame(rows)
+
+
+def rescue_route_scores(event: dict[str, Any], result: dict[str, Any], routes: pd.DataFrame) -> pd.DataFrame:
+    if routes.empty:
+        return routes
+
+    routes = numeric(routes.copy(), ["Capacity", "Pickup Minutes"])
+    predicted_leftovers = max(float(result.get("Predicted Leftovers", 0)), 0)
+    food = str(event.get("Food", "")).lower()
+    donation_ready = event.get("Donation Route") == "Yes"
+
+    scored = []
+    for _, row in routes.iterrows():
+        capacity = max(float(row.get("Capacity", 0) or 0), 0)
+        pickup = max(float(row.get("Pickup Minutes", 999) or 999), 1)
+        route_type = str(row.get("Route Type", ""))
+        food_form = str(row.get("Food Form", ""))
+        notes = str(row.get("Notes", ""))
+
+        score = 50.0
+
+        if predicted_leftovers <= 0:
+            score -= 10
+        elif capacity >= predicted_leftovers:
+            score += 20
+        elif capacity >= predicted_leftovers * 0.5:
+            score += 10
+        else:
+            score -= 12
+
+        if pickup <= 15:
+            score += 15
+        elif pickup <= 45:
+            score += 8
+        elif pickup <= 90:
+            score += 2
+        else:
+            score -= 10
+
+        if food_form == "Mixed food":
+            score += 4
+        elif "snack" in food or "bar" in food or "bakery" in food:
+            if food_form in ["Packaged snacks", "Bakery items"]:
+                score += 12
+        elif "fruit" in food or "produce" in food:
+            if food_form in ["Produce", "Mixed food"]:
+                score += 12
+        elif food_form in ["Prepared meals", "Mixed food"]:
+            score += 7
+
+        if route_type == "Donation partner" and donation_ready:
+            score += 10
+        if route_type == "Compost program":
+            score -= 8
+            if predicted_leftovers > capacity * 0.8:
+                score += 5
+
+        score = float(np.clip(score, 0, 100))
+
+        if score >= 75:
+            recommendation = "Best fit"
+        elif score >= 55:
+            recommendation = "Backup option"
+        else:
+            recommendation = "Use only if needed"
+
+        scored.append(
+            {
+                "Route Name": row.get("Route Name", ""),
+                "Route Type": route_type,
+                "Contact": row.get("Contact", ""),
+                "Capacity": int(capacity),
+                "Pickup Minutes": int(pickup),
+                "Food Form": food_form,
+                "Readiness Score": round(score, 1),
+                "Recommendation": recommendation,
+                "Notes": notes,
+            }
+        )
+
+    return pd.DataFrame(scored).sort_values("Readiness Score", ascending=False)
+
+
+def rescue_message(event: dict[str, Any], result: dict[str, Any], route: pd.Series | dict[str, Any]) -> str:
+    route_name = route.get("Route Name", "your team")
+    food = event.get("Food", "food")
+    leftovers = result.get("Predicted Leftovers", 0)
+    event_name = event.get("Event Name", "the event")
+    location = event.get("Location", "the event location")
+
+    return (
+        f"Hi {route_name}, our project is forecasting about {leftovers} possible leftover portions "
+        f"of {food} from {event_name} at {location}. Could you confirm whether your team may be able "
+        f"to review or receive this food if trained staff approve it under food safety rules? "
+        f"We can share the final count after the event."
+    )
 
 
 def numeric(df: pd.DataFrame, cols: list[str]) -> pd.DataFrame:
@@ -981,31 +1184,46 @@ def home_page() -> None:
             ]
         )
 
-    b1, b2, b3 = st.columns(3)
+    b1, b2, b3, b4 = st.columns(4)
     with b1:
         if st.button("Go to Forecast", use_container_width=True):
             st.session_state.page = "Forecast"
             st.rerun()
     with b2:
+        if st.button("Rescue Board", use_container_width=True):
+            st.session_state.page = "Rescue Board"
+            st.rerun()
+    with b3:
         if st.button("Add sample records", use_container_width=True):
             reset_project_records(connected_project())
+            reset_project_routes(connected_project())
             full = load_data()
             sample = make_sample_data(connected_project())
             full = pd.concat([full[full["Project"] != connected_project()], sample], ignore_index=True)
             save_data(full)
-            st.success("Sample records added to this project.")
+            route_full = load_routes()
+            route_sample = sample_routes(connected_project())
+            route_full = pd.concat([route_full[route_full["Project"] != connected_project()], route_sample], ignore_index=True)
+            save_routes(route_full)
+            st.success("Sample records and rescue routes added to this project.")
             st.rerun()
-    with b3:
+    with b4:
         if st.button("View Dashboard", use_container_width=True):
             st.session_state.page = "Dashboard"
             st.rerun()
 
     with st.container(border=True):
-        st.subheader("Project goal")
-        st.write(
-            "Use this project to predict when food waste is likely to happen, identify patterns from past results, "
-            "and choose realistic actions to reduce, redistribute, or better manage leftovers."
-        )
+        st.subheader("What this project helps you do")
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            st.markdown("**Predict risk**")
+            st.write("See when and where food waste is likely before food is prepared.")
+        with c2:
+            st.markdown("**Match a rescue route**")
+            st.write("Rank donation, student pickup, staff review, and compost options before leftovers appear.")
+        with c3:
+            st.markdown("**Improve the next event**")
+            st.write("Use dashboard patterns to reduce waste over time.")
 
 
 def forecast_page() -> None:
@@ -1040,6 +1258,37 @@ def forecast_page() -> None:
             st.subheader("Practical actions")
             for i, action in enumerate(suggested_actions(event, result), start=1):
                 st.write(f"**{i}. {action}**")
+
+        routes = project_routes(connected_project())
+        scored_routes = rescue_route_scores(event, result, routes)
+        with st.container(border=True):
+            st.subheader("Rescue route match")
+            if scored_routes.empty:
+                st.write("No rescue routes saved yet. Add routes in Rescue Board so the app can match leftovers to the best next step.")
+            else:
+                top_route = scored_routes.iloc[0]
+                st.success(
+                    f"Best route: {top_route['Route Name']} · {top_route['Readiness Score']:.0f}/100 readiness",
+                    icon="✅",
+                )
+                st.dataframe(
+                    scored_routes[
+                        [
+                            "Route Name",
+                            "Route Type",
+                            "Capacity",
+                            "Pickup Minutes",
+                            "Readiness Score",
+                            "Recommendation",
+                        ]
+                    ],
+                    use_container_width=True,
+                )
+                st.text_area(
+                    "Message to copy",
+                    rescue_message(event, result, top_route),
+                    height=130,
+                )
 
         st.header("What-if simulator")
         st.write("Test a different amount of prepared food and see how the predicted waste changes.")
@@ -1346,6 +1595,92 @@ def dashboard_page() -> None:
     st.dataframe(df[show_cols].tail(15), use_container_width=True)
 
 
+def rescue_board_page() -> None:
+    st.title("Rescue Board")
+    st.write(
+        "Save the people, teams, and programs that can help manage surplus food. "
+        "Forecasts use this board to recommend the best rescue route before leftovers appear."
+    )
+
+    project = connected_project()
+    routes = project_routes(project)
+
+    with st.container(border=True):
+        st.subheader("Add a rescue route")
+        c1, c2 = st.columns(2)
+        with c1:
+            route_name = st.text_input("Route name", placeholder="Example: Student Council Snack Table")
+            route_type = st.selectbox("Route type", ROUTE_TYPES)
+            contact = st.text_input("Contact or email", placeholder="Example: student.council@school.ca")
+            food_form = st.selectbox("Best food fit", FOOD_FORMS)
+        with c2:
+            capacity = st.number_input("Capacity in portions", min_value=1, value=25, step=1)
+            pickup = st.number_input("How fast can they respond? minutes", min_value=1, value=30, step=5)
+            notes = st.text_area("Notes", placeholder="Example: only unopened packaged items, staff review required, pickup near cafeteria.")
+
+        if st.button("Save rescue route", use_container_width=True):
+            if not route_name.strip():
+                st.error("Please enter a route name.")
+            else:
+                add_route(
+                    {
+                        "Project": project,
+                        "Route Name": route_name.strip(),
+                        "Route Type": route_type,
+                        "Contact": contact.strip(),
+                        "Capacity": int(capacity),
+                        "Pickup Minutes": int(pickup),
+                        "Food Form": food_form,
+                        "Notes": notes.strip(),
+                    }
+                )
+                st.success("Rescue route saved.")
+                st.rerun()
+
+    b1, b2 = st.columns(2)
+    with b1:
+        if st.button("Add sample rescue routes", use_container_width=True):
+            reset_project_routes(project)
+            route_full = load_routes()
+            route_sample = sample_routes(project)
+            route_full = pd.concat([route_full[route_full["Project"] != project], route_sample], ignore_index=True)
+            save_routes(route_full)
+            st.success("Sample rescue routes added.")
+            st.rerun()
+    with b2:
+        if st.button("Reset rescue routes", use_container_width=True):
+            reset_project_routes(project)
+            st.success("Rescue routes reset.")
+            st.rerun()
+
+    st.subheader("Saved rescue routes")
+    routes = project_routes(project)
+    if routes.empty:
+        st.warning("No routes yet. Add at least one route so forecasts can recommend where surplus should go.")
+    else:
+        st.dataframe(
+            routes[
+                [
+                    "Route Name",
+                    "Route Type",
+                    "Contact",
+                    "Capacity",
+                    "Pickup Minutes",
+                    "Food Form",
+                    "Notes",
+                ]
+            ],
+            use_container_width=True,
+        )
+
+    with st.container(border=True):
+        st.subheader("Why this is useful")
+        st.write(
+            "Most food waste tools stop at measurement. This board turns a forecast into an operations plan: "
+            "who can take surplus, how much they can handle, how fast they can respond, and what message students should send."
+        )
+
+
 def report_text(df: pd.DataFrame, project: str) -> str:
     df = numeric(df, ["Waste Rate", "Leftover Portions", "Cost Impact", "CO2e Impact", "Potential Meals Rescued"])
     lines = [
@@ -1453,7 +1788,7 @@ def main() -> None:
     if not project_gate():
         return
 
-    pages = ["Home", "Forecast", "Log Result", "Dashboard", "Report", "Project Settings"]
+    pages = ["Home", "Forecast", "Rescue Board", "Log Result", "Dashboard", "Report", "Project Settings"]
     current = st.session_state.page if st.session_state.page in pages else "Home"
     page = st.radio("Navigation", pages, index=pages.index(current), horizontal=True, label_visibility="collapsed")
     st.session_state.page = page
@@ -1462,6 +1797,8 @@ def main() -> None:
         home_page()
     elif page == "Forecast":
         forecast_page()
+    elif page == "Rescue Board":
+        rescue_board_page()
     elif page == "Log Result":
         log_page()
     elif page == "Dashboard":
