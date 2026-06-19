@@ -1,70 +1,29 @@
-# Food Waste Rescue Radar
+# Food Rescue Radar
 
-A clean premium environmental MVP for the **High School Track — AI for Everyday Good** challenge.
+Food Rescue Radar is an AI-powered Streamlit app that helps schools and community groups predict food waste before it happens.
 
-## Direction
+## What it does
 
-**Direction A: Food Waste Rescue Radar**
+- Creates separate projects for cafeterias, clubs, events, or community groups.
+- Predicts where food waste is likely to happen.
+- Identifies patterns that lead to waste.
+- Suggests realistic actions to reduce, redistribute, or manage leftovers.
+- Logs real event results.
+- Shows dashboard patterns by food, day, risk level, and intervention.
+- Exports CSV data and a simple impact report.
 
-The app helps a school, community group, or local organization understand food waste patterns and take practical action before waste happens.
+## AI features
 
-## What the app does
+The app includes:
 
-1. **Scan a food plan before an event**
-   - Predicts food waste risk.
-   - Gives a risk score and risk level.
-   - Recommends a realistic preparation range.
-   - Explains the main risk drivers.
+1. **AI forecast engine**  
+   Scores risk using attendance, prepared portions, weather, menu popularity, confidence, day, intervention, and project history.
 
-2. **Create a student-friendly action plan**
-   - Attendance confirmation.
-   - Smaller first batch.
-   - Menu preference survey.
-   - Donation or redistribution planning.
-   - Compost planning.
+2. **Historical learning model**  
+   When a project has enough records, the app trains a Random Forest model to improve predictions from past results.
 
-3. **Log real event results**
-   - Actual attendance.
-   - Food prepared.
-   - Leftover portions.
-   - Waste rate.
-   - Estimated cost and CO2e impact.
-
-4. **Detect patterns**
-   - Highest-waste foods.
-   - Waste by day.
-   - Risk mix.
-   - Intervention comparison.
-   - Recent results.
-
-5. **Export evidence**
-   - CSV data.
-   - Markdown impact report.
-
-## Is AI integrated?
-
-Yes.
-
-### Built-in AI risk engine
-This is always active and does not need an API key. It uses:
-- attendance confidence,
-- expected attendance,
-- planned portions,
-- menu popularity,
-- weather,
-- day of week,
-- event type,
-- batch cooking,
-- intervention type,
-- historical patterns.
-
-### Historical ML prediction
-When the dataset has enough records, the app trains a lightweight `RandomForestRegressor` using previous event results.
-
-### Optional Groq AI Advisor
-If you add a Groq API key, the app also generates written recommendations.
-
-The app still works without Groq.
+3. **Groq AI Advisor**  
+   Uses Groq to create a written action plan for each forecast.
 
 ## Run locally
 
@@ -73,16 +32,16 @@ pip install -r requirements.txt
 streamlit run app.py
 ```
 
-## Optional Streamlit Secrets
+## Add Groq API key locally
 
-Create `.streamlit/secrets.toml` locally or add this in Streamlit Cloud Secrets:
+Create a file named `.streamlit/secrets.toml` and add:
 
 ```toml
-GROQ_API_KEY = "your_key_here"
+GROQ_API_KEY = "your_groq_api_key_here"
 ```
 
-Never commit the real `secrets.toml`.
+Do not commit the real `secrets.toml` file.
 
 ## Responsible AI
 
-The app supports planning only. It does not decide whether food is safe to serve, donate, reuse, compost, or discard. Human staff must inspect food and follow local food safety rules.
+The app supports planning only. It does not decide whether food is safe to serve, donate, reuse, compost, or discard. Trained human staff must inspect food and follow local food safety rules.
