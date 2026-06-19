@@ -1,163 +1,89 @@
-# Food Waste Rescue Radar — Premium MVP
+# Food Waste Rescue Radar
 
-**High School Track — AI for Everyday Good**  
-Direction A: **Food Waste Rescue Radar**
+A premium Streamlit MVP for the **High School Track — AI for Everyday Good** challenge.
 
-Food Waste Rescue Radar is an AI-powered Streamlit MVP that helps schools, cafeterias, student clubs, community events, and local organizations predict food waste risk, understand patterns, and take practical action before food is wasted.
+## Mission
 
-## Why this project matters
+Build an AI-powered MVP that helps a school, community group, or local organization understand their environmental impact and take practical action.
 
-Schools and community groups often prepare food without knowing exactly how many people will attend, which meals will be popular, or how much rescue capacity is available. This can create avoidable food waste, cost loss, and environmental impact.
+This project follows **Direction A: Food Waste Rescue Radar**.
 
-This app helps users make better decisions by combining:
+It helps users:
 
-- event planning data
-- expected attendance
-- weather and day-of-week risk
-- menu popularity
-- batch cooking availability
-- donation/storage capacity
-- historical food waste records
-- optional Groq AI coaching
+- predict where food waste is likely to happen,
+- identify patterns that lead to waste,
+- recommend realistic portion ranges,
+- create practical rescue action plans,
+- log real event results,
+- track environmental and cost impact over time.
 
-## Premium features
+## Why this version is stronger
 
-### 1. Mission Control
-A polished landing dashboard that explains the mission, shows organization-level impact, and guides users through the workflow.
+This is not just a calculator. It combines:
 
-### 2. Waste Risk Scanner
-A pre-event forecasting tool that generates:
+1. **Rule-based risk engine**  
+   Uses attendance, weather, menu popularity, day of week, confidence, intervention planning, and operational flexibility.
 
-- Waste Risk Score from 0 to 100
-- Low / Medium / High risk level
-- predicted waste rate
-- predicted attendance and consumption
-- smart preparation range
-- expected excess portions
-- potential rescued meals
-- cost and CO2e exposure
-- top risk drivers
-- before/during/after action plan
+2. **Historical learning mode**  
+   When enough records exist, the app trains a lightweight `RandomForestRegressor` using past event data.
 
-### 3. What-if Simulator
-Compares different preparation strategies:
+3. **What-if simulator**  
+   Students can test different preparation amounts and immediately see predicted waste, leftovers, and shortage risk.
 
-- current plan
-- reduce 10%
-- reduce 20%
-- smart range low
-- smart range high
+4. **Impact Intelligence dashboard**  
+   Detects high-waste meals, high-risk days, intervention patterns, cost impact, CO2e impact, and potential rescued meals.
 
-This helps users see how changing food preparation affects predicted waste, cost exposure, rescue capacity, and shortage risk.
+5. **Responsible AI design**  
+   The app gives planning suggestions only. It does not decide food safety. Human staff must inspect food and follow local food safety rules.
 
-### 4. Event Result Logger
-After an event, users can log:
+## Pages
 
-- actual attendance
-- food prepared
-- leftover portions
-- intervention used
-- donation capacity
-- storage capacity
+### Mission Control
+Premium home screen, quick actions, demo data, and overall workspace metrics.
 
-These actual records improve the dashboard and unlock historical learning.
+### Waste Risk Scanner
+Pre-event tool that estimates waste risk and recommends a smarter portion range.
 
-### 5. Hybrid AI / ML engine
-The app starts with a transparent rule-based prediction model. Once the user has at least 10 actual records, it unlocks a lightweight historical machine learning model using `RandomForestRegressor` from scikit-learn.
+### Event Result Logger
+Post-event tool for logging actual attendance, prepared portions, and leftovers.
 
-The model uses features such as:
+### Impact Intelligence
+Dashboard for trends, patterns, intervention signals, and environmental/cost impact.
 
-- event type
-- location
-- day of week
-- meal time
-- meal type
-- menu popularity
-- weather
-- attendance confidence
-- expected attendance
-- prepared portions
-- donation partner availability
-- batch cooking availability
-- storage capacity
+### Data & Export
+CSV export and markdown impact report for presentations or judging.
 
-### 6. Impact Intelligence Dashboard
-The dashboard identifies patterns such as:
+## Setup
 
-- waste trend over time
-- highest-waste meals
-- highest-risk days
-- meal-time/day heatmap
-- intervention effectiveness
-- rescued meals
-- CO2e exposure
-- cost exposure
-
-### 7. Data & Export
-Users can:
-
-- load demo data for judging/testing
-- download their CSV
-- download a plain-language impact summary
-- clear their own records
-
-## Technology stack
-
-- Python
-- Streamlit
-- Pandas
-- NumPy
-- Plotly
-- Scikit-learn
-- Groq API, optional
-
-## How to run locally
+Install requirements:
 
 ```bash
 pip install -r requirements.txt
+```
+
+Run locally:
+
+```bash
 streamlit run app.py
 ```
 
-## How to deploy on Streamlit Community Cloud
+## Optional Groq AI Coach
 
-1. Upload these files to a GitHub repository.
-2. Go to Streamlit Community Cloud.
-3. Connect the GitHub repository.
-4. Set the main file path to:
-
-```text
-app.py
-```
-
-5. Deploy.
-
-## Optional Groq setup
-
-The app works without Groq. If you want the optional AI Coach to work, add a Streamlit secret:
+The app runs without an API key. To enable the optional AI Coach, add this in Streamlit Cloud secrets or local `.streamlit/secrets.toml`:
 
 ```toml
-GROQ_API_KEY = "your_api_key_here"
+GROQ_API_KEY = "your_key_here"
 ```
 
-Do not upload `.streamlit/secrets.toml` to GitHub. This project's `.gitignore` already excludes that file.
+Do not commit your real `secrets.toml`.
 
-## Responsible AI and food safety
+## Deployment
 
-The app gives planning suggestions only. It does **not** decide whether food is safe to donate, store, serve again, compost, or discard.
+1. Push these files to GitHub.
+2. Deploy on Streamlit Community Cloud.
+3. Select `app.py` as the main file.
+4. Add `GROQ_API_KEY` in Streamlit Secrets only if using the optional AI Coach.
 
-Human staff must inspect food, follow local food safety rules, and make all final food safety decisions.
+## Responsible AI note
 
-## Suggested judging demo flow
-
-1. Enter any username, for example:
-
-```text
-green_school_team
-```
-
-2. Click **Load demo data** in the sidebar.
-3. Open **Impact Intelligence** to show charts and pattern detection.
-4. Open **Waste Risk Scanner** and run a forecast.
-5. Show the What-if Simulator and Rescue Action Plan.
-6. Open **Event Result Logger** to save an actual event result.
-7. Return to **Impact Intelligence** to show how the dashboard updates.
+This app supports planning and environmental decision-making only. It does not determine whether food is safe to donate, reuse, serve, compost, or discard. Human staff must follow local food safety policies.

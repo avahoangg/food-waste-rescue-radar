@@ -1,56 +1,102 @@
-from __future__ import annotations
-
-import math
-from datetime import datetime, timedelta
+import json
+from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
-import plotly.express as px
-import plotly.graph_objects as go
 import streamlit as st
 
 try:
+    import plotly.graph_objects as go
+    import plotly.express as px
+    PLOTLY_AVAILABLE = True
+except Exception:
+    PLOTLY_AVAILABLE = False
+
+try:
     from groq import Groq
-except Exception:  # pragma: no cover - app still works without the package/key
-    Groq = None
+    GROQ_AVAILABLE = True
+except Exception:
+    GROQ_AVAILABLE = False
 
 try:
     from sklearn.compose import ColumnTransformer
     from sklearn.ensemble import RandomForestRegressor
     from sklearn.pipeline import Pipeline
     from sklearn.preprocessing import OneHotEncoder
-except Exception:  # pragma: no cover - app still works in rule-based mode
-    ColumnTransformer = None
-    RandomForestRegressor = None
-    Pipeline = None
-    OneHotEncoder = None
+    SKLEARN_AVAILABLE = True
+except Exception:
+    SKLEARN_AVAILABLE = False
 
 
-# ------------------------------------------------------------
+# -----------------------------------------------------------------------------
 # Page setup
-# ------------------------------------------------------------
+# -----------------------------------------------------------------------------
 st.set_page_config(
     page_title="Food Waste Rescue Radar",
-    page_icon="♻️",
+    page_icon="🌿",
     layout="wide",
-    initial_sidebar_state="expanded",
+    initial_sidebar_state="collapsed",
 )
 
-APP_NAME = "Food Waste Rescue Radar"
-TAGLINE = "AI-powered food waste intelligence for schools and community events."
+
+APP_TITLE = "Food Waste Rescue Radar"
 HISTORY_FILE = Path("historical_data.csv")
+
+EVENT_TYPES = [
+    "School lunch",
+    "Breakfast program",
+    "After-school club",
+    "Sports event",
+    "Community event",
+    "Fundraiser",
+    "Donation program",
+]
+
+LOCATIONS = [
+    "Cafeteria",
+    "Classroom",
+    "Gym",
+    "Library / common area",
+    "Outdoor area",
+    "Community hall",
+    "Event venue",
+]
+
+MEAL_TIMES = ["Breakfast", "Lunch", "Snack", "Dinner", "All-day event"]
+DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+
+WEATHER_OPTIONS = [
+    "Normal",
+    "Sunny",
+    "Cloudy",
+    "Rainy",
+    "Stormy",
+    "Very hot",
+    "Very cold",
+]
+
+CONFIDENCE_OPTIONS = ["High", "Medium", "Low"]
+INTERVENTIONS = [
+    "None yet",
+    "Pre-order form",
+    "Attendance confirmation",
+    "Smaller first batch",
+    "Menu preference survey",
+    "Donation partner ready",
+    "Reusable serving station",
+    "Compost plan",
+    "Mixed intervention",
+]
 
 HISTORY_COLUMNS = [
     "Username",
-    "Timestamp",
-    "Record Type",
+    "Time",
     "Event Type",
     "Location",
     "Day of Week",
     "Meal Time",
-    "Meal Type",
+    "Meal / Food Type",
     "Menu Popularity",
     "Weather",
     "Attendance Confidence",
@@ -62,314 +108,534 @@ HISTORY_COLUMNS = [
     "Predicted Waste Rate",
     "Risk Score",
     "Risk Level",
-    "Recommended Min",
-    "Recommended Max",
+    "Recommended Min Portions",
+    "Recommended Max Portions",
     "Donation Partner Available",
-    "Donation Capacity",
     "Batch Cooking Available",
-    "Storage Capacity",
+    "Reusable Serving Available",
     "Intervention Used",
+    "Cost per Portion",
+    "CO2e per Portion",
+    "Estimated Cost Impact",
+    "Estimated CO2e Impact",
     "Potential Meals Rescued",
-    "Estimated CO2 Kg",
-    "Estimated Cost CAD",
-    "Estimated Cost Saved CAD",
     "Notes",
 ]
 
-EVENT_TYPES = [
-    "School lunch",
-    "Breakfast program",
-    "After-school club",
-    "Sports event",
-    "Community event",
-    "Fundraiser / banquet",
-    "Grocery donation program",
-]
 
-LOCATIONS = [
-    "Cafeteria",
-    "Classroom",
-    "Gym / Hall",
-    "Outdoor field",
-    "Community centre",
-    "Donation pickup point",
-    "Party / Event venue",
-]
-
-DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
-MEAL_TIMES = ["Breakfast", "Lunch", "Dinner", "Snack / Break", "After-school", "Full-day event"]
-WEATHER_OPTIONS = ["Normal", "Sunny", "Cloudy", "Rainy", "Stormy", "Very hot", "Snowy / icy"]
-ATTENDANCE_CONFIDENCE = ["High", "Medium", "Low"]
-INTERVENTIONS = [
-    "None yet",
-    "Pre-order / RSVP",
-    "Smaller first batch",
-    "Menu popularity check",
-    "Donation partner on standby",
-    "Compost plan",
-    "Student awareness campaign",
-    "Portion size adjustment",
-]
-
-WEATHER_ATTENDANCE_MODIFIER = {
-    "Normal": 1.00,
-    "Sunny": 1.02,
-    "Cloudy": 0.98,
-    "Rainy": 0.90,
-    "Stormy": 0.78,
-    "Very hot": 0.92,
-    "Snowy / icy": 0.86,
-}
-
-DAY_ATTENDANCE_MODIFIER = {
-    "Monday": 0.97,
-    "Tuesday": 1.00,
-    "Wednesday": 1.00,
-    "Thursday": 0.99,
-    "Friday": 0.93,
-    "Saturday": 0.91,
-    "Sunday": 0.88,
-}
-
-MEAL_TIME_MODIFIER = {
-    "Breakfast": 0.88,
-    "Lunch": 1.00,
-    "Dinner": 0.96,
-    "Snack / Break": 0.92,
-    "After-school": 0.87,
-    "Full-day event": 0.95,
-}
-
-CONFIDENCE_RISK_POINTS = {"High": 2, "Medium": 10, "Low": 20}
-WEATHER_RISK_POINTS = {
-    "Normal": 0,
-    "Sunny": 1,
-    "Cloudy": 3,
-    "Rainy": 11,
-    "Stormy": 20,
-    "Very hot": 12,
-    "Snowy / icy": 15,
-}
-
-FOOD_SAFETY_NOTE = (
-    "Responsible AI note: this app supports planning only. Human staff must inspect food, "
-    "follow local food safety rules, and decide whether leftovers can be served, stored, "
-    "donated, composted, or discarded."
-)
-
-
-# ------------------------------------------------------------
-# Premium CSS
-# ------------------------------------------------------------
+# -----------------------------------------------------------------------------
+# Luxury emerald CSS
+# -----------------------------------------------------------------------------
 def inject_css() -> None:
     st.markdown(
         """
         <style>
         :root {
-            --bg: #0E1111;
-            --panel: rgba(255,255,255,0.055);
-            --panel-strong: rgba(255,255,255,0.09);
-            --text: #F8F4EC;
-            --muted: #B8B0A4;
-            --gold: #C8A45D;
-            --sage: #AFC7A3;
-            --green: #1F4D3A;
-            --danger: #E57373;
-            --warning: #E6B85C;
+            --forest: #123D2B;
+            --deep: #0B2A1D;
+            --emerald: #1F7A4D;
+            --moss: #6F8F5E;
+            --sage: #DCEBDD;
+            --sage-2: #EAF4E8;
+            --ivory: #FBF8EF;
+            --paper: rgba(255, 255, 250, 0.76);
+            --paper-solid: #FFFDF5;
+            --gold: #B9903D;
+            --gold-soft: #E8D8AE;
+            --ink: #153729;
+            --muted: #607469;
+            --line: rgba(31, 122, 77, 0.17);
+            --shadow: 0 22px 65px rgba(18, 61, 43, 0.12);
+            --soft-shadow: 0 14px 36px rgba(18, 61, 43, 0.09);
         }
+
+        html, body, [class*="css"] {
+            font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        }
+
         .stApp {
             background:
-                radial-gradient(circle at top left, rgba(200,164,93,0.16), transparent 32%),
-                radial-gradient(circle at top right, rgba(31,77,58,0.20), transparent 38%),
-                linear-gradient(135deg, #0E1111 0%, #111715 46%, #0A0B0B 100%);
-            color: var(--text);
+                radial-gradient(circle at 8% 3%, rgba(185, 144, 61, 0.12), transparent 31%),
+                radial-gradient(circle at 88% 9%, rgba(31, 122, 77, 0.16), transparent 34%),
+                linear-gradient(135deg, #F7FBF4 0%, #EFF7EE 40%, #E2F0E1 100%);
+            color: var(--ink);
         }
-        [data-testid="stSidebar"] {
-            background: linear-gradient(180deg, rgba(15,20,18,0.98), rgba(7,8,8,0.98));
-            border-right: 1px solid rgba(200,164,93,0.18);
+
+        [data-testid="stHeader"] {
+            background: rgba(247, 251, 244, 0.72);
+            backdrop-filter: blur(18px);
+            border-bottom: 1px solid rgba(31, 122, 77, 0.10);
         }
+
+        [data-testid="stToolbar"] { right: 1.2rem; }
+
+        .block-container {
+            padding-top: 1.7rem;
+            padding-bottom: 4rem;
+            max-width: 1160px;
+        }
+
+        section[data-testid="stSidebar"] {
+            background: linear-gradient(180deg, #F7FBF4, #E7F2E3);
+            border-right: 1px solid rgba(31, 122, 77, 0.16);
+        }
+
         h1, h2, h3 {
-            letter-spacing: -0.03em;
+            color: var(--forest);
+            letter-spacing: -0.035em;
         }
+
+        h1 {
+            font-size: clamp(2.65rem, 6vw, 5.65rem) !important;
+            line-height: 0.92 !important;
+            font-weight: 830 !important;
+        }
+
+        h2 {
+            font-size: clamp(1.7rem, 3vw, 2.55rem) !important;
+            font-weight: 780 !important;
+        }
+
+        h3 {
+            font-size: 1.24rem !important;
+            font-weight: 740 !important;
+        }
+
+        p, li, label, .stMarkdown, [data-testid="stMetricLabel"] {
+            color: var(--ink);
+        }
+
+        .muted, .muted p {
+            color: var(--muted) !important;
+        }
+
+        .topbar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 1rem;
+            margin-bottom: 1.1rem;
+        }
+
+        .brand {
+            display: inline-flex;
+            align-items: center;
+            gap: .65rem;
+            padding: .56rem .82rem;
+            border: 1px solid rgba(31, 122, 77, .18);
+            border-radius: 999px;
+            background: rgba(255, 255, 250, .68);
+            box-shadow: 0 10px 30px rgba(31, 122, 77, .06);
+            color: var(--forest);
+            font-weight: 740;
+            letter-spacing: -.01em;
+        }
+
+        .brand-mark {
+            width: 2rem;
+            height: 2rem;
+            border-radius: 999px;
+            display: grid;
+            place-items: center;
+            background: linear-gradient(135deg, var(--forest), var(--emerald));
+            color: #F6F0DE;
+            box-shadow: 0 8px 24px rgba(31, 122, 77, .24);
+        }
+
+        .user-pill {
+            padding: .62rem .9rem;
+            border-radius: 999px;
+            background: rgba(18, 61, 43, .07);
+            color: var(--forest);
+            border: 1px solid rgba(31, 122, 77, .13);
+            font-size: .86rem;
+            font-weight: 650;
+        }
+
         .hero {
-            padding: 2.3rem 2rem;
-            border: 1px solid rgba(200,164,93,0.25);
-            border-radius: 28px;
-            background: linear-gradient(135deg, rgba(255,255,255,0.08), rgba(255,255,255,0.025));
-            box-shadow: 0 24px 80px rgba(0,0,0,0.36);
-            margin-bottom: 1.3rem;
+            position: relative;
+            overflow: hidden;
+            padding: clamp(2rem, 4vw, 3.7rem);
+            border-radius: 34px;
+            border: 1px solid rgba(31, 122, 77, 0.17);
+            background:
+                linear-gradient(130deg, rgba(255, 253, 245, .88), rgba(232, 244, 228, .78)),
+                radial-gradient(circle at top right, rgba(185, 144, 61, .22), transparent 33%);
+            box-shadow: var(--shadow);
+            margin-bottom: 1.25rem;
         }
+
+        .hero:after {
+            content: "";
+            position: absolute;
+            right: -115px;
+            top: -115px;
+            width: 310px;
+            height: 310px;
+            border-radius: 50%;
+            background: radial-gradient(circle, rgba(31,122,77,.24), transparent 68%);
+            filter: blur(2px);
+        }
+
         .eyebrow {
-            color: var(--gold);
-            font-size: 0.78rem;
-            font-weight: 700;
-            letter-spacing: .18em;
-            text-transform: uppercase;
-            margin-bottom: .6rem;
-        }
-        .hero-title {
-            font-size: clamp(2.2rem, 5vw, 4.4rem);
-            line-height: 0.95;
-            font-weight: 800;
-            color: #FFF9ED;
-            margin-bottom: 1rem;
-        }
-        .hero-subtitle {
-            max-width: 880px;
-            color: #D8D0C3;
-            font-size: 1.08rem;
-            line-height: 1.65;
-        }
-        .glass-card {
-            padding: 1.15rem 1.25rem;
-            border-radius: 22px;
-            border: 1px solid rgba(255,255,255,0.11);
-            background: linear-gradient(145deg, rgba(255,255,255,0.08), rgba(255,255,255,0.025));
-            box-shadow: 0 18px 42px rgba(0,0,0,0.18);
-            height: 100%;
-        }
-        .card-label {
+            display: inline-flex;
+            align-items: center;
+            gap: .55rem;
             color: var(--gold);
             font-size: .78rem;
-            font-weight: 700;
+            font-weight: 850;
+            letter-spacing: .18em;
             text-transform: uppercase;
-            letter-spacing: .14em;
+            margin-bottom: 1rem;
         }
-        .card-title {
-            font-size: 1.22rem;
-            font-weight: 780;
-            margin: .35rem 0 .45rem 0;
-            color: #FFF9ED;
+
+        .hero-subtitle {
+            max-width: 740px;
+            font-size: clamp(1.08rem, 1.6vw, 1.32rem);
+            line-height: 1.65;
+            color: #416055;
+            margin-top: 1.1rem;
+            margin-bottom: 1.4rem;
         }
-        .card-copy {
-            color: #CFC7B9;
-            font-size: .96rem;
-            line-height: 1.55;
+
+        .hero-chips {
+            display: flex;
+            flex-wrap: wrap;
+            gap: .65rem;
+            margin-top: 1rem;
         }
-        .lux-note {
-            color: #D8D0C3;
-            border-left: 3px solid var(--gold);
-            padding: .72rem 1rem;
-            background: rgba(200,164,93,0.08);
-            border-radius: 14px;
-        }
-        div[data-testid="stMetric"] {
-            border: 1px solid rgba(255,255,255,0.10);
-            background: rgba(255,255,255,0.055);
-            border-radius: 18px;
-            padding: 1rem;
-            box-shadow: 0 10px 32px rgba(0,0,0,0.15);
-        }
-        div[data-testid="stMetricLabel"] p { color: #C8A45D !important; }
-        div[data-testid="stMetricValue"] { color: #FFF9ED !important; }
-        .stButton > button {
+
+        .chip {
+            display: inline-flex;
+            align-items: center;
+            gap: .45rem;
+            padding: .58rem .78rem;
             border-radius: 999px;
-            border: 1px solid rgba(200,164,93,.45);
-            background: linear-gradient(135deg, rgba(200,164,93,.90), rgba(150,112,45,.88));
-            color: #111 !important;
+            background: rgba(255,255,250,.72);
+            border: 1px solid rgba(31,122,77,.16);
+            color: var(--forest);
+            font-weight: 650;
+            font-size: .88rem;
+            box-shadow: 0 8px 22px rgba(18, 61, 43, .05);
+        }
+
+        .panel {
+            padding: 1.35rem;
+            border-radius: 24px;
+            background: rgba(255, 253, 245, .72);
+            border: 1px solid rgba(31, 122, 77, 0.16);
+            box-shadow: var(--soft-shadow);
+            backdrop-filter: blur(20px);
+            margin-bottom: 1rem;
+        }
+
+        .panel-soft {
+            padding: 1.25rem;
+            border-radius: 22px;
+            background: rgba(236, 247, 232, .62);
+            border: 1px solid rgba(31, 122, 77, 0.13);
+            margin-bottom: 1rem;
+        }
+
+        .metric-grid {
+            display: grid;
+            grid-template-columns: repeat(4, minmax(0, 1fr));
+            gap: .9rem;
+            margin: .65rem 0 1rem 0;
+        }
+
+        .metric-card {
+            padding: 1.05rem;
+            border-radius: 22px;
+            background: linear-gradient(180deg, rgba(255,253,245,.88), rgba(239,247,236,.76));
+            border: 1px solid rgba(31,122,77,.14);
+            box-shadow: 0 14px 30px rgba(18, 61, 43, .07);
+        }
+
+        .metric-label {
+            color: var(--muted);
+            font-size: .76rem;
             font-weight: 750;
-            box-shadow: 0 12px 28px rgba(200,164,93,.16);
+            text-transform: uppercase;
+            letter-spacing: .08em;
+            margin-bottom: .35rem;
         }
+
+        .metric-value {
+            color: var(--forest);
+            font-size: 1.55rem;
+            font-weight: 820;
+            letter-spacing: -.04em;
+        }
+
+        .metric-caption {
+            color: #73867C;
+            font-size: .82rem;
+            margin-top: .3rem;
+        }
+
+        .section-title {
+            margin-top: 1.2rem;
+            margin-bottom: .8rem;
+            display: flex;
+            align-items: center;
+            gap: .65rem;
+        }
+
+        .section-number {
+            display: inline-grid;
+            place-items: center;
+            width: 2rem;
+            height: 2rem;
+            border-radius: 999px;
+            background: linear-gradient(135deg, var(--forest), var(--emerald));
+            color: #FFFBEA;
+            font-size: .82rem;
+            font-weight: 850;
+        }
+
+        .risk-low, .risk-medium, .risk-high {
+            display: inline-flex;
+            align-items: center;
+            gap: .42rem;
+            padding: .48rem .72rem;
+            border-radius: 999px;
+            font-weight: 800;
+            font-size: .84rem;
+            border: 1px solid;
+        }
+
+        .risk-low {
+            color: #16603F;
+            background: rgba(31, 122, 77, .11);
+            border-color: rgba(31, 122, 77, .22);
+        }
+
+        .risk-medium {
+            color: #8A641B;
+            background: rgba(185, 144, 61, .15);
+            border-color: rgba(185, 144, 61, .28);
+        }
+
+        .risk-high {
+            color: #8B2F27;
+            background: rgba(176, 79, 65, .12);
+            border-color: rgba(176, 79, 65, .22);
+        }
+
+        .insight-card {
+            padding: 1rem 1rem 1rem 1.05rem;
+            border-radius: 18px;
+            background: rgba(255,255,250,.70);
+            border: 1px solid rgba(31,122,77,.13);
+            border-left: 5px solid var(--emerald);
+            margin: .55rem 0;
+            box-shadow: 0 10px 24px rgba(18,61,43,.055);
+        }
+
+        .action-card {
+            padding: .92rem 1rem;
+            border-radius: 18px;
+            background: rgba(255, 253, 245, .74);
+            border: 1px solid rgba(31,122,77,.13);
+            margin: .45rem 0;
+            display: flex;
+            gap: .75rem;
+            align-items: flex-start;
+        }
+
+        .action-icon {
+            flex: 0 0 auto;
+            display: grid;
+            place-items: center;
+            width: 1.75rem;
+            height: 1.75rem;
+            border-radius: 999px;
+            background: rgba(31,122,77,.12);
+            color: var(--forest);
+            font-weight: 850;
+        }
+
+        .footer-note {
+            margin-top: 1.5rem;
+            padding: 1rem 1.15rem;
+            border-radius: 20px;
+            background: rgba(18, 61, 43, .06);
+            border: 1px solid rgba(18, 61, 43, .10);
+            color: #607469;
+            font-size: .92rem;
+        }
+
+        .stButton > button {
+            border-radius: 999px !important;
+            border: 1px solid rgba(18, 61, 43, .10) !important;
+            background: linear-gradient(135deg, #123D2B 0%, #1F7A4D 100%) !important;
+            color: #FFFBEA !important;
+            font-weight: 760 !important;
+            padding: .78rem 1.15rem !important;
+            box-shadow: 0 14px 30px rgba(31, 122, 77, .18) !important;
+            transition: transform .16s ease, box-shadow .16s ease, filter .16s ease !important;
+        }
+
         .stButton > button:hover {
-            border-color: #F2D28D;
-            filter: brightness(1.06);
+            transform: translateY(-1px);
+            filter: brightness(1.03);
+            box-shadow: 0 18px 42px rgba(31, 122, 77, .24) !important;
         }
-        div[data-baseweb="select"] > div, .stTextInput input, .stNumberInput input, textarea {
-            border-radius: 14px !important;
+
+        div[data-testid="stDownloadButton"] > button {
+            border-radius: 999px !important;
+            background: linear-gradient(135deg, #B9903D 0%, #D9BE79 100%) !important;
+            color: #143425 !important;
+            border: 1px solid rgba(185,144,61,.25) !important;
+            font-weight: 800 !important;
         }
-        .small-muted { color: #B8B0A4; font-size: .9rem; }
-        .status-high { color: #E57373; font-weight: 800; }
-        .status-medium { color: #E6B85C; font-weight: 800; }
-        .status-low { color: #AFC7A3; font-weight: 800; }
-        .divider { height: 1px; background: rgba(200,164,93,0.18); margin: 1.1rem 0; }
-        footer {visibility: hidden;}
+
+        div[data-testid="stTextInput"] input,
+        div[data-testid="stNumberInput"] input,
+        div[data-testid="stSelectbox"] div[data-baseweb="select"] > div,
+        div[data-testid="stTextArea"] textarea {
+            border-radius: 15px !important;
+            border: 1px solid rgba(31,122,77,.20) !important;
+            background-color: rgba(255, 253, 245, .92) !important;
+            color: var(--ink) !important;
+            box-shadow: none !important;
+        }
+
+        div[data-testid="stTextInput"] input:focus,
+        div[data-testid="stNumberInput"] input:focus,
+        div[data-testid="stTextArea"] textarea:focus {
+            border-color: rgba(31,122,77,.45) !important;
+            box-shadow: 0 0 0 4px rgba(31,122,77,.09) !important;
+        }
+
+        div[data-testid="stSlider"] div[role="slider"] {
+            background-color: var(--emerald) !important;
+            border-color: var(--emerald) !important;
+        }
+
+        div[data-testid="stRadio"] label {
+            border-radius: 999px;
+        }
+
+        .stTabs [data-baseweb="tab-list"] {
+            gap: .55rem;
+            background: rgba(255,253,245,.6);
+            padding: .45rem;
+            border-radius: 999px;
+            border: 1px solid rgba(31,122,77,.14);
+        }
+
+        .stTabs [data-baseweb="tab"] {
+            border-radius: 999px;
+            color: var(--forest);
+            font-weight: 750;
+        }
+
+        .stTabs [aria-selected="true"] {
+            background: linear-gradient(135deg, rgba(31,122,77,.14), rgba(185,144,61,.14));
+        }
+
+        [data-testid="stExpander"] {
+            border: 1px solid rgba(31,122,77,.14) !important;
+            border-radius: 19px !important;
+            background: rgba(255,253,245,.55) !important;
+            box-shadow: 0 10px 24px rgba(18, 61, 43, .05) !important;
+        }
+
+        .dataframe {
+            border-radius: 18px !important;
+        }
+
+        @media (max-width: 920px) {
+            .metric-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+            .topbar { flex-direction: column; align-items: flex-start; }
+        }
+
+        @media (max-width: 640px) {
+            .metric-grid { grid-template-columns: 1fr; }
+            h1 { font-size: 2.55rem !important; }
+            .hero { padding: 1.5rem; border-radius: 26px; }
+        }
         </style>
         """,
         unsafe_allow_html=True,
     )
 
 
-# ------------------------------------------------------------
-# Storage helpers
-# ------------------------------------------------------------
-def clean_username(username: str) -> str:
-    return username.strip().lower().replace(" ", "_")
+# -----------------------------------------------------------------------------
+# Data functions
+# -----------------------------------------------------------------------------
+def normalize_username(name: str) -> str:
+    name = (name or "").strip().lower().replace(" ", "_")
+    return "".join(ch for ch in name if ch.isalnum() or ch in ["_", "-", "."])
 
 
 def load_history() -> pd.DataFrame:
     if not HISTORY_FILE.exists():
         return pd.DataFrame(columns=HISTORY_COLUMNS)
 
-    try:
-        df = pd.read_csv(HISTORY_FILE)
-    except Exception:
-        return pd.DataFrame(columns=HISTORY_COLUMNS)
+    history = pd.read_csv(HISTORY_FILE)
 
     for col in HISTORY_COLUMNS:
-        if col not in df.columns:
-            df[col] = np.nan
+        if col not in history.columns:
+            history[col] = np.nan
 
-    return df[HISTORY_COLUMNS]
+    return history[HISTORY_COLUMNS]
 
 
-def save_record(row: Dict[str, Any]) -> None:
+def save_record(row: dict) -> None:
     history = load_history()
-    complete = {col: row.get(col, np.nan) for col in HISTORY_COLUMNS}
-    updated = pd.concat([history, pd.DataFrame([complete])], ignore_index=True)
+    row_df = pd.DataFrame([row])
+    updated = pd.concat([history, row_df], ignore_index=True)
     updated.to_csv(HISTORY_FILE, index=False)
 
 
-def save_many(rows: List[Dict[str, Any]]) -> None:
-    for row in rows:
-        save_record(row)
-
-
-def get_user_history(username: Optional[str] = None) -> pd.DataFrame:
+def save_many(rows: list[dict]) -> None:
     history = load_history()
-    user = username or st.session_state.get("username")
-    if not user:
-        return history.iloc[0:0]
-    return history[history["Username"].astype(str) == user].copy()
+    rows_df = pd.DataFrame(rows)
+    updated = pd.concat([history, rows_df], ignore_index=True)
+    updated.to_csv(HISTORY_FILE, index=False)
 
 
-def numeric(df: pd.DataFrame, columns: List[str]) -> pd.DataFrame:
-    out = df.copy()
+def get_user_history() -> pd.DataFrame:
+    username = st.session_state.get("username")
+    history = load_history()
+    if not username:
+        return pd.DataFrame(columns=HISTORY_COLUMNS)
+    return history[history["Username"] == username].copy()
+
+
+def clear_user_history() -> None:
+    username = st.session_state.get("username")
+    history = load_history()
+    history = history[history["Username"] != username]
+    history.to_csv(HISTORY_FILE, index=False)
+
+
+def to_numeric(df: pd.DataFrame, columns: list[str]) -> pd.DataFrame:
     for col in columns:
-        if col in out.columns:
-            out[col] = pd.to_numeric(out[col], errors="coerce")
-    return out
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors="coerce")
+    return df
 
 
-def bool_label(value: bool) -> str:
-    return "Yes" if value else "No"
-
-
-def yes_no_to_bool(value: Any) -> bool:
-    return str(value).strip().lower() in {"yes", "true", "1", "available"}
-
-
-# ------------------------------------------------------------
-# AI helper
-# ------------------------------------------------------------
-def get_groq_client() -> Optional[Any]:
-    if Groq is None:
+# -----------------------------------------------------------------------------
+# AI and model logic
+# -----------------------------------------------------------------------------
+def get_groq_client():
+    if not GROQ_AVAILABLE:
         return None
-
     try:
         api_key = st.secrets.get("GROQ_API_KEY", None)
     except Exception:
         api_key = None
-
     if not api_key:
         return None
-
-    try:
-        return Groq(api_key=api_key)
-    except Exception:
-        return None
+    return Groq(api_key=api_key)
 
 
-def ask_ai(prompt: str) -> Optional[str]:
+def ask_ai(prompt: str) -> str | None:
     client = get_groq_client()
     if client is None:
         return None
@@ -381,131 +647,197 @@ def ask_ai(prompt: str) -> Optional[str]:
                 {
                     "role": "system",
                     "content": (
-                        "You are an expert but practical food waste reduction advisor for schools. "
-                        "Be specific, realistic, concise, and safe. Do not give food safety guarantees. "
-                        "Always remind users that human staff must make food safety decisions."
+                        "You are an AI assistant for a high school environmental impact MVP. "
+                        "Give practical, realistic, concise recommendations for reducing food waste. "
+                        "Do not guarantee food safety, do not decide donation safety, and always remind users "
+                        "that human staff must follow local food safety rules."
                     ),
                 },
                 {"role": "user", "content": prompt},
             ],
             temperature=0.35,
-            max_tokens=900,
+            max_tokens=720,
         )
         return response.choices[0].message.content
     except Exception:
         return None
 
 
-# ------------------------------------------------------------
-# Risk engine and model
-# ------------------------------------------------------------
-def get_risk_level(score: float) -> str:
+def risk_level_from_score(score: float) -> str:
     if score >= 70:
         return "High"
-    if score >= 40:
+    if score >= 42:
         return "Medium"
     return "Low"
 
 
-def get_status_class(level: str) -> str:
-    if level == "High":
-        return "status-high"
-    if level == "Medium":
-        return "status-medium"
-    return "status-low"
+def risk_badge(level: str) -> str:
+    css_class = {
+        "Low": "risk-low",
+        "Medium": "risk-medium",
+        "High": "risk-high",
+    }.get(level, "risk-medium")
+    icon = {"Low": "●", "Medium": "●", "High": "●"}.get(level, "●")
+    return f'<span class="{css_class}">{icon} {level} Risk</span>'
 
 
-def popularity_modifier(menu_popularity: int) -> float:
-    return {1: 0.68, 2: 0.82, 3: 0.94, 4: 1.00, 5: 1.06}.get(int(menu_popularity), 0.94)
+def expected_attendance_multiplier(weather: str, confidence: str, popularity: int, day: str) -> float:
+    multiplier = 1.0
+
+    weather_factors = {
+        "Normal": 1.00,
+        "Sunny": 1.02,
+        "Cloudy": 0.99,
+        "Rainy": 0.94,
+        "Stormy": 0.88,
+        "Very hot": 0.93,
+        "Very cold": 0.92,
+    }
+    confidence_factors = {
+        "High": 1.02,
+        "Medium": 0.98,
+        "Low": 0.91,
+    }
+    popularity_factors = {
+        1: 0.86,
+        2: 0.92,
+        3: 0.98,
+        4: 1.03,
+        5: 1.07,
+    }
+    day_factors = {
+        "Monday": 0.97,
+        "Tuesday": 1.00,
+        "Wednesday": 1.00,
+        "Thursday": 1.01,
+        "Friday": 0.96,
+        "Saturday": 0.95,
+        "Sunday": 0.93,
+    }
+
+    multiplier *= weather_factors.get(weather, 1.0)
+    multiplier *= confidence_factors.get(confidence, 0.98)
+    multiplier *= popularity_factors.get(int(popularity), 0.98)
+    multiplier *= day_factors.get(day, 1.0)
+
+    return max(0.68, min(1.16, multiplier))
 
 
-def confidence_buffer(confidence: str) -> float:
-    return {"High": 0.04, "Medium": 0.08, "Low": 0.13}.get(confidence, 0.08)
+def calculate_recommendation(
+    expected_attendance: int,
+    weather: str,
+    confidence: str,
+    menu_popularity: int,
+    day_of_week: str,
+    batch_cooking: bool,
+) -> tuple[int, int, int]:
+    expected_attendance = max(int(expected_attendance), 1)
+    multiplier = expected_attendance_multiplier(weather, confidence, menu_popularity, day_of_week)
+    target = expected_attendance * multiplier
+
+    if batch_cooking:
+        low = target * 0.92
+        high = target * 1.01
+    else:
+        low = target * 0.96
+        high = target * 1.07
+
+    return max(1, int(round(low))), max(1, int(round(high))), max(1, int(round(target)))
 
 
-def build_current_feature_row(inputs: Dict[str, Any]) -> pd.DataFrame:
-    return pd.DataFrame(
-        [
-            {
-                "Event Type": inputs.get("event_type"),
-                "Location": inputs.get("location"),
-                "Day of Week": inputs.get("day_of_week"),
-                "Meal Time": inputs.get("meal_time"),
-                "Meal Type": inputs.get("meal_type") or "Unknown",
-                "Menu Popularity": inputs.get("menu_popularity", 3),
-                "Weather": inputs.get("weather"),
-                "Attendance Confidence": inputs.get("attendance_confidence"),
-                "Expected Attendance": inputs.get("expected_attendance", 0),
-                "Food Prepared": inputs.get("food_prepared", 0),
-                "Donation Partner Available": bool_label(inputs.get("donation_partner_available", False)),
-                "Batch Cooking Available": bool_label(inputs.get("batch_cooking_available", False)),
-                "Storage Capacity": inputs.get("storage_capacity", 0),
-            }
-        ]
-    )
+def history_similarity_signal(history: pd.DataFrame, event_type: str, meal_time: str, meal_type: str) -> tuple[float | None, str | None]:
+    if history.empty:
+        return None, None
+
+    history = to_numeric(history.copy(), ["Waste Rate"])
+    relevant = history.dropna(subset=["Waste Rate"])
+
+    if relevant.empty:
+        return None, None
+
+    meal_type_lower = str(meal_type or "").strip().lower()
+
+    filters = [
+        (relevant["Event Type"].astype(str) == event_type) & (relevant["Meal Time"].astype(str) == meal_time),
+        relevant["Event Type"].astype(str) == event_type,
+    ]
+
+    if meal_type_lower:
+        filters.insert(
+            0,
+            relevant["Meal / Food Type"].astype(str).str.lower().str.contains(meal_type_lower, regex=False, na=False),
+        )
+
+    for mask in filters:
+        subset = relevant[mask]
+        if len(subset) >= 2:
+            avg = float(subset["Waste Rate"].mean())
+            label = f"similar records average {avg:.1f}% waste"
+            return avg, label
+
+    avg = float(relevant["Waste Rate"].tail(8).mean())
+    return avg, f"recent records average {avg:.1f}% waste"
 
 
-def train_historical_model(history: pd.DataFrame) -> Tuple[Optional[Any], str, int]:
-    if any(x is None for x in [ColumnTransformer, RandomForestRegressor, Pipeline, OneHotEncoder]):
-        return None, "Rule-based mode", 0
+def train_historical_model(history: pd.DataFrame):
+    if not SKLEARN_AVAILABLE:
+        return None, "scikit-learn is not installed"
 
-    df = history.copy()
-    df = df[df["Record Type"].isin(["Actual Result", "Demo Actual Result"])]
-    df = numeric(
-        df,
-        [
-            "Menu Popularity",
-            "Expected Attendance",
-            "Food Prepared",
-            "Waste Rate",
-            "Storage Capacity",
-        ],
-    )
-    df = df.dropna(subset=["Waste Rate", "Expected Attendance", "Food Prepared"])
+    history = history.copy()
+    numeric_cols = [
+        "Expected Attendance",
+        "Food Prepared",
+        "Menu Popularity",
+        "Cost per Portion",
+        "CO2e per Portion",
+        "Waste Rate",
+    ]
+    history = to_numeric(history, numeric_cols)
+    history = history.dropna(subset=["Waste Rate", "Expected Attendance", "Food Prepared"])
 
-    if len(df) < 10:
-        return None, f"Rule-based mode — add {10 - len(df)} more actual records to unlock learning", len(df)
+    if len(history) < 12:
+        return None, "Add at least 12 logged records to unlock historical learning"
+    if history["Waste Rate"].nunique() < 3:
+        return None, "Historical data needs more variation before a model is useful"
 
-    features = [
+    feature_cols = [
         "Event Type",
         "Location",
         "Day of Week",
         "Meal Time",
-        "Meal Type",
+        "Meal / Food Type",
         "Menu Popularity",
         "Weather",
         "Attendance Confidence",
         "Expected Attendance",
         "Food Prepared",
-        "Donation Partner Available",
         "Batch Cooking Available",
-        "Storage Capacity",
+        "Intervention Used",
     ]
+    for col in feature_cols:
+        if col not in history.columns:
+            history[col] = ""
 
-    for col in features:
-        if col not in df.columns:
-            df[col] = "Unknown"
-
-    X = df[features]
-    y = df["Waste Rate"].clip(lower=0, upper=100)
+    X = history[feature_cols].copy()
+    y = history["Waste Rate"].clip(0, 100)
 
     categorical = [
         "Event Type",
         "Location",
         "Day of Week",
         "Meal Time",
-        "Meal Type",
+        "Meal / Food Type",
         "Weather",
         "Attendance Confidence",
-        "Donation Partner Available",
         "Batch Cooking Available",
+        "Intervention Used",
     ]
-    numerical = ["Menu Popularity", "Expected Attendance", "Food Prepared", "Storage Capacity"]
+    numeric = ["Menu Popularity", "Expected Attendance", "Food Prepared"]
 
     preprocessor = ColumnTransformer(
         transformers=[
-            ("categorical", OneHotEncoder(handle_unknown="ignore"), categorical),
-            ("numerical", "passthrough", numerical),
+            ("cat", OneHotEncoder(handle_unknown="ignore"), categorical),
+            ("num", "passthrough", numeric),
         ]
     )
 
@@ -515,277 +847,207 @@ def train_historical_model(history: pd.DataFrame) -> Tuple[Optional[Any], str, i
             (
                 "model",
                 RandomForestRegressor(
-                    n_estimators=220,
-                    random_state=42,
+                    n_estimators=180,
                     min_samples_leaf=2,
-                    max_depth=8,
+                    random_state=42,
                 ),
             ),
         ]
     )
 
     model.fit(X, y)
-    return model, f"Hybrid learning mode — trained on {len(df)} actual records", len(df)
+    return model, f"Historical learning enabled using {len(history)} records"
 
 
-def rule_based_forecast(inputs: Dict[str, Any]) -> Dict[str, Any]:
-    expected_attendance = max(float(inputs.get("expected_attendance", 0)), 0)
-    planned = max(float(inputs.get("food_prepared", 0)), 0)
-    menu_popularity = int(inputs.get("menu_popularity", 3))
-    weather = inputs.get("weather", "Normal")
-    day = inputs.get("day_of_week", "Tuesday")
-    meal_time = inputs.get("meal_time", "Lunch")
-    confidence = inputs.get("attendance_confidence", "Medium")
-    donation_available = bool(inputs.get("donation_partner_available", False))
-    batch_available = bool(inputs.get("batch_cooking_available", False))
-    donation_capacity = max(float(inputs.get("donation_capacity", 0)), 0)
-    storage_capacity = max(float(inputs.get("storage_capacity", 0)), 0)
-    cost_per_portion = max(float(inputs.get("cost_per_portion", 2.5)), 0)
-    co2_per_portion = max(float(inputs.get("co2_per_portion", 0.5)), 0)
+def predict_with_historical_model(model, row: dict) -> float | None:
+    if model is None:
+        return None
+    feature_cols = [
+        "Event Type",
+        "Location",
+        "Day of Week",
+        "Meal Time",
+        "Meal / Food Type",
+        "Menu Popularity",
+        "Weather",
+        "Attendance Confidence",
+        "Expected Attendance",
+        "Food Prepared",
+        "Batch Cooking Available",
+        "Intervention Used",
+    ]
+    X = pd.DataFrame([{col: row.get(col, "") for col in feature_cols}])
+    try:
+        return float(model.predict(X)[0])
+    except Exception:
+        return None
 
-    attendance_modifier = (
-        WEATHER_ATTENDANCE_MODIFIER.get(weather, 1.0)
-        * DAY_ATTENDANCE_MODIFIER.get(day, 1.0)
-        * MEAL_TIME_MODIFIER.get(meal_time, 1.0)
+
+def calculate_rule_based_prediction(
+    *,
+    event_type: str,
+    location: str,
+    day_of_week: str,
+    meal_time: str,
+    meal_type: str,
+    menu_popularity: int,
+    weather: str,
+    confidence: str,
+    expected_attendance: int,
+    food_prepared: int,
+    donation_available: bool,
+    batch_cooking: bool,
+    reusable_serving: bool,
+    intervention: str,
+    history: pd.DataFrame,
+) -> dict:
+    expected_attendance = max(int(expected_attendance), 1)
+    food_prepared = max(int(food_prepared), 1)
+
+    rec_min, rec_max, predicted_demand = calculate_recommendation(
+        expected_attendance,
+        weather,
+        confidence,
+        menu_popularity,
+        day_of_week,
+        batch_cooking,
     )
-    predicted_attendance = expected_attendance * attendance_modifier
-    predicted_consumption = predicted_attendance * popularity_modifier(menu_popularity)
 
-    if planned <= 0:
-        rule_waste_rate = 0.0
-        overprep_portions = 0.0
-        shortage_risk = max(predicted_consumption, 0.0)
-    else:
-        overprep_portions = max(planned - predicted_consumption, 0.0)
-        shortage_risk = max(predicted_consumption - planned, 0.0)
-        rule_waste_rate = min(max(overprep_portions / planned * 100, 0.0), 90.0)
+    predicted_leftover = max(food_prepared - predicted_demand, 0)
+    predicted_waste_rate = predicted_leftover / food_prepared * 100
 
-    buffer = confidence_buffer(confidence)
-    if batch_available:
-        recommended_min = math.ceil(predicted_consumption * 0.92)
-        recommended_max = math.ceil(predicted_consumption * (1.02 + buffer * 0.35))
-    else:
-        recommended_min = math.ceil(predicted_consumption * 0.95)
-        recommended_max = math.ceil(predicted_consumption * (1.05 + buffer))
+    overprep_rate = max(food_prepared - expected_attendance, 0) / expected_attendance * 100
+    score = 18 + predicted_waste_rate * 1.18 + overprep_rate * 0.33
+    drivers = []
 
-    recommended_min = max(recommended_min, 0)
-    recommended_max = max(recommended_max, recommended_min)
+    if food_prepared > rec_max:
+        score += min(22, (food_prepared - rec_max) / expected_attendance * 70)
+        drivers.append(f"Planned portions are above the recommended range ({rec_min}–{rec_max}).")
 
-    overprep_rate_vs_recommended = 0.0
-    if recommended_max > 0:
-        overprep_rate_vs_recommended = max((planned - recommended_max) / recommended_max * 100, 0)
-
-    drivers: Dict[str, float] = {}
-    drivers["Predicted leftover rate"] = rule_waste_rate * 1.35
-    drivers["Attendance uncertainty"] = CONFIDENCE_RISK_POINTS.get(confidence, 10)
-    drivers[f"Weather: {weather}"] = WEATHER_RISK_POINTS.get(weather, 0)
-    drivers["Over-preparation vs smart range"] = min(overprep_rate_vs_recommended * 0.55, 22)
-    drivers["Low menu popularity"] = max((4 - menu_popularity) * 7, 0)
-    drivers["No batch cooking flexibility"] = 8 if not batch_available else 0
-    drivers["No rescue partner on standby"] = 7 if not donation_available else 0
-    drivers["Limited storage capacity"] = 6 if storage_capacity < max(overprep_portions * 0.35, 5) else 0
-
-    risk_score = min(max(sum(drivers.values()), 0), 100)
-    risk_level = get_risk_level(risk_score)
-
-    potential_rescued = 0.0
-    if donation_available:
-        potential_rescued += min(overprep_portions, donation_capacity)
-    potential_rescued += min(max(overprep_portions - potential_rescued, 0), storage_capacity)
-
-    waste_after_rescue = max(overprep_portions - potential_rescued, 0)
-    estimated_cost = overprep_portions * cost_per_portion
-    estimated_cost_saved = min(potential_rescued, overprep_portions) * cost_per_portion
-    estimated_co2 = overprep_portions * co2_per_portion
-
-    sorted_drivers = sorted(
-        [(k, round(v, 1)) for k, v in drivers.items() if v > 0.5],
-        key=lambda x: x[1],
-        reverse=True,
-    )[:5]
-
-    return {
-        "rule_waste_rate": round(rule_waste_rate, 1),
-        "predicted_waste_rate": round(rule_waste_rate, 1),
-        "predicted_attendance": round(predicted_attendance, 1),
-        "predicted_consumption": round(predicted_consumption, 1),
-        "overprep_portions": round(overprep_portions, 1),
-        "shortage_risk_portions": round(shortage_risk, 1),
-        "recommended_min": recommended_min,
-        "recommended_max": recommended_max,
-        "risk_score": round(risk_score, 0),
-        "risk_level": risk_level,
-        "top_drivers": sorted_drivers,
-        "potential_rescued": round(potential_rescued, 1),
-        "waste_after_rescue": round(waste_after_rescue, 1),
-        "estimated_cost": round(estimated_cost, 2),
-        "estimated_cost_saved": round(estimated_cost_saved, 2),
-        "estimated_co2": round(estimated_co2, 2),
-        "model_mode": "Rule-based mode",
-    }
-
-
-def evaluate_event(inputs: Dict[str, Any], history: Optional[pd.DataFrame] = None) -> Dict[str, Any]:
-    metrics = rule_based_forecast(inputs)
-    user_history = history if history is not None else get_user_history()
-    model, mode, n_records = train_historical_model(user_history)
-
-    if model is not None:
-        feature_row = build_current_feature_row(inputs)
-        try:
-            ml_pred = float(model.predict(feature_row)[0])
-            blended = (0.58 * ml_pred) + (0.42 * metrics["rule_waste_rate"])
-            metrics["predicted_waste_rate"] = round(min(max(blended, 0), 90), 1)
-            metrics["ml_predicted_waste_rate"] = round(ml_pred, 1)
-            # Recalibrate risk score using learned prediction.
-            recalibrated_score = min(max(metrics["risk_score"] * 0.55 + metrics["predicted_waste_rate"] * 1.65, 0), 100)
-            metrics["risk_score"] = round(recalibrated_score, 0)
-            metrics["risk_level"] = get_risk_level(recalibrated_score)
-        except Exception:
-            pass
-
-    metrics["model_mode"] = mode
-    metrics["training_records"] = n_records
-    return metrics
-
-
-def actual_waste_metrics(inputs: Dict[str, Any]) -> Dict[str, Any]:
-    prepared = max(float(inputs.get("food_prepared", 0)), 0)
-    leftover = max(float(inputs.get("leftover_portions", 0)), 0)
-    actual_attendance = max(float(inputs.get("actual_attendance", 0)), 0)
-    expected_attendance = max(float(inputs.get("expected_attendance", 0)), 0)
-    cost_per_portion = max(float(inputs.get("cost_per_portion", 2.5)), 0)
-    co2_per_portion = max(float(inputs.get("co2_per_portion", 0.5)), 0)
-    donation_available = bool(inputs.get("donation_partner_available", False))
-    donation_capacity = max(float(inputs.get("donation_capacity", 0)), 0)
-    storage_capacity = max(float(inputs.get("storage_capacity", 0)), 0)
-
-    waste_rate = 0 if prepared == 0 else min(leftover / prepared * 100, 100)
-    attendance_gap = expected_attendance - actual_attendance
-    rescued = 0.0
-    if donation_available:
-        rescued += min(leftover, donation_capacity)
-    rescued += min(max(leftover - rescued, 0), storage_capacity)
-    discarded_estimate = max(leftover - rescued, 0)
-
-    risk_score = min(waste_rate * 2.2 + max(attendance_gap, 0) * 0.3, 100)
-
-    return {
-        "waste_rate": round(waste_rate, 1),
-        "risk_score": round(risk_score, 0),
-        "risk_level": get_risk_level(risk_score),
-        "attendance_gap": round(attendance_gap, 1),
-        "rescued": round(rescued, 1),
-        "discarded_estimate": round(discarded_estimate, 1),
-        "estimated_cost": round(leftover * cost_per_portion, 2),
-        "estimated_co2": round(leftover * co2_per_portion, 2),
-        "estimated_cost_saved": round(rescued * cost_per_portion, 2),
-    }
-
-
-def build_action_plan(inputs: Dict[str, Any], metrics: Dict[str, Any]) -> Dict[str, List[str]]:
-    risk_level = metrics.get("risk_level", "Medium")
-    planned = int(inputs.get("food_prepared", 0))
-    recommended_min = int(metrics.get("recommended_min", 0))
-    recommended_max = int(metrics.get("recommended_max", 0))
-    overprep = metrics.get("overprep_portions", 0)
-    donation_available = bool(inputs.get("donation_partner_available", False))
-    batch_available = bool(inputs.get("batch_cooking_available", False))
-    confidence = inputs.get("attendance_confidence", "Medium")
-
-    before = [
-        f"Set the smart preparation target to {recommended_min}–{recommended_max} portions instead of {planned} if feasible.",
-        "Confirm attendance or collect simple pre-orders 24 hours before the event.",
-        "Separate food into a first batch and a backup batch so the team can pause production if turnout is low.",
-    ]
-    during = [
-        "Track attendance during the first 15–30 minutes and compare it with the expected count.",
-        "Use smaller serving portions first, then offer seconds if demand is strong.",
-        "Record which menu items are skipped or repeatedly returned uneaten.",
-    ]
-    after = [
-        "Log actual attendance, prepared portions, and leftover portions in the dashboard immediately after the event.",
-        "Label leftover categories for human review: unopened, untouched, opened, compost only, or discard.",
-        "Use the dashboard to compare waste before and after interventions.",
-    ]
-
-    if risk_level == "High":
-        before.insert(0, "High-risk alert: reduce over-preparation before the event rather than relying only on donation afterward.")
     if confidence == "Low":
-        before.append("Because attendance confidence is low, prepare a conservative first batch and keep shelf-stable backup options available.")
-    if not batch_available:
-        during.append("Because batch cooking is unavailable, use smaller initial plating and avoid opening all items at once.")
-    if donation_available:
-        after.append(f"If human food-safety checks approve, route up to the available rescue capacity for donation/storage instead of disposal.")
-    else:
-        after.append("No donation partner is listed, so create a verified rescue contact list before the next high-risk event.")
-    if overprep > 15:
-        before.append(f"The plan may create about {overprep:.0f} excess portions; assign one student/staff member to monitor rescue options.")
+        score += 15
+        drivers.append("Attendance confidence is low, so over-preparation risk is higher.")
+    elif confidence == "Medium":
+        score += 6
+        drivers.append("Attendance confidence is only medium; confirmation could improve accuracy.")
 
-    return {"Before event": before[:5], "During event": during[:5], "After event": after[:5]}
+    if weather in ["Rainy", "Stormy", "Very hot", "Very cold"]:
+        impact = {"Rainy": 8, "Stormy": 15, "Very hot": 10, "Very cold": 10}[weather]
+        score += impact
+        drivers.append(f"{weather} conditions may reduce turnout or appetite.")
+
+    if int(menu_popularity) <= 2:
+        score += 14 if int(menu_popularity) == 1 else 9
+        drivers.append("Menu popularity is low, which often increases leftovers.")
+    elif int(menu_popularity) >= 4:
+        score -= 4
+
+    if day_of_week in ["Friday", "Monday"]:
+        score += 4
+        drivers.append(f"{day_of_week} can be less predictable for school attendance and meal demand.")
+
+    if event_type in ["Community event", "Fundraiser", "Donation program"]:
+        score += 4
+        drivers.append("Community events often have more uncertain attendance than regular lunches.")
+
+    if batch_cooking:
+        score -= 9
+        drivers.append("Batch cooking lowers risk because food can be prepared in stages.")
+    if reusable_serving:
+        score -= 4
+    if intervention != "None yet":
+        score -= 6
+        drivers.append(f"Intervention planned: {intervention}.")
+
+    history_avg, history_label = history_similarity_signal(history, event_type, meal_time, meal_type)
+    if history_avg is not None:
+        if history_avg >= 25:
+            score += 10
+            drivers.append(f"Historical signal: {history_label}.")
+        elif history_avg >= 12:
+            score += 4
+            drivers.append(f"Historical signal: {history_label}.")
+        elif history_avg < 8:
+            score -= 4
+            drivers.append(f"Historical signal: {history_label}.")
+
+    score = float(np.clip(score, 5, 96))
+    risk_level = risk_level_from_score(score)
+
+    rescue_capacity = min(predicted_leftover, 20 if donation_available else 0)
+
+    return {
+        "risk_score": round(score, 1),
+        "risk_level": risk_level,
+        "predicted_demand": int(predicted_demand),
+        "predicted_leftover": int(round(predicted_leftover)),
+        "predicted_waste_rate": round(predicted_waste_rate, 1),
+        "recommended_min": int(rec_min),
+        "recommended_max": int(rec_max),
+        "rescue_capacity": int(rescue_capacity),
+        "drivers": drivers[:5] if drivers else ["No major red flags. Continue tracking actual attendance and leftovers."],
+    }
 
 
-def scenario_table(inputs: Dict[str, Any], history: Optional[pd.DataFrame] = None) -> pd.DataFrame:
-    base_planned = int(inputs.get("food_prepared", 0))
-    variants = []
-    candidates = [
-        ("Current plan", base_planned),
-        ("Reduce 10%", max(int(base_planned * 0.90), 0)),
-        ("Reduce 20%", max(int(base_planned * 0.80), 0)),
-        ("Smart range low", None),
-        ("Smart range high", None),
+def generate_action_plan(result: dict, donation_available: bool, batch_cooking: bool, intervention: str) -> list[tuple[str, str]]:
+    score = result["risk_score"]
+    rec_min = result["recommended_min"]
+    rec_max = result["recommended_max"]
+    predicted_left = result["predicted_leftover"]
+
+    actions = [
+        ("Set the prep range", f"Prepare about {rec_min}–{rec_max} portions instead of treating the original plan as fixed."),
+        ("Confirm attendance", "Use a quick form, homeroom count, or club RSVP 24 hours before food is prepared."),
     ]
-    base_metrics = evaluate_event(inputs, history)
-    candidates[3] = ("Smart range low", int(base_metrics["recommended_min"]))
-    candidates[4] = ("Smart range high", int(base_metrics["recommended_max"]))
 
-    for label, prepared in candidates:
-        scenario_inputs = inputs.copy()
-        scenario_inputs["food_prepared"] = prepared
-        metrics = evaluate_event(scenario_inputs, history)
-        shortage = metrics.get("shortage_risk_portions", 0)
-        variants.append(
-            {
-                "Scenario": label,
-                "Prepared Portions": prepared,
-                "Predicted Waste Rate": metrics["predicted_waste_rate"],
-                "Risk Score": metrics["risk_score"],
-                "Risk Level": metrics["risk_level"],
-                "Expected Excess Portions": metrics["overprep_portions"],
-                "Shortage Risk Portions": shortage,
-                "Estimated Cost Exposure": metrics["estimated_cost"],
-                "Potential Meals Rescued": metrics["potential_rescued"],
-            }
-        )
-    return pd.DataFrame(variants)
+    if score >= 70:
+        actions.insert(1, ("Reduce first batch", "Start with 70–80% of expected demand and hold the rest as a flexible backup."))
+    elif score >= 42:
+        actions.insert(1, ("Keep a controlled buffer", "Prepare a modest buffer, but avoid cooking the full surplus upfront."))
+
+    if not batch_cooking:
+        actions.append(("Add batch control", "Split preparation into smaller batches so staff can stop early if turnout is lower than expected."))
+
+    if predicted_left > 0:
+        if donation_available:
+            actions.append(("Prepare rescue route", "Pre-label possible surplus for human review and contact the donation partner only if staff confirm safety."))
+        else:
+            actions.append(("Create a rescue backup", "Identify a verified donation, staff meal, or compost route before the event starts."))
+
+    if intervention == "None yet":
+        actions.append(("Track one intervention", "Choose one simple intervention this time so the dashboard can compare before vs. after results."))
+
+    return actions[:6]
 
 
-# ------------------------------------------------------------
-# Demo data
-# ------------------------------------------------------------
-def make_demo_rows(username: str) -> List[Dict[str, Any]]:
-    base = datetime.now() - timedelta(days=58)
-    rows: List[Dict[str, Any]] = []
-    examples = [
-        ("School lunch", "Cafeteria", "Monday", "Lunch", "Pasta", 3, "Normal", "High", 180, 172, 190, 31, "None yet"),
-        ("School lunch", "Cafeteria", "Tuesday", "Lunch", "Chicken rice", 5, "Sunny", "High", 185, 188, 190, 8, "Menu popularity check"),
-        ("Breakfast program", "Cafeteria", "Wednesday", "Breakfast", "Bagels", 4, "Cloudy", "Medium", 95, 84, 105, 18, "Pre-order / RSVP"),
-        ("After-school club", "Classroom", "Wednesday", "After-school", "Fruit cups", 2, "Rainy", "Low", 55, 34, 70, 29, "None yet"),
-        ("Sports event", "Gym / Hall", "Friday", "Dinner", "Pizza", 5, "Normal", "Medium", 120, 104, 140, 21, "Smaller first batch"),
-        ("Community event", "Community centre", "Saturday", "Full-day event", "Sandwiches", 3, "Stormy", "Low", 160, 103, 190, 61, "Donation partner on standby"),
-        ("Fundraiser / banquet", "Gym / Hall", "Friday", "Dinner", "Vegetarian curry", 2, "Very hot", "Medium", 145, 118, 170, 47, "Donation partner on standby"),
-        ("School lunch", "Cafeteria", "Thursday", "Lunch", "Tacos", 5, "Sunny", "High", 190, 193, 198, 9, "Portion size adjustment"),
-        ("School lunch", "Cafeteria", "Friday", "Lunch", "Fish sandwiches", 2, "Rainy", "Medium", 175, 139, 190, 52, "Student awareness campaign"),
-        ("Breakfast program", "Cafeteria", "Monday", "Breakfast", "Cereal packs", 3, "Snowy / icy", "Low", 100, 71, 115, 37, "None yet"),
-        ("Grocery donation program", "Donation pickup point", "Wednesday", "Full-day event", "Produce boxes", 4, "Normal", "Medium", 75, 73, 82, 6, "Donation partner on standby"),
-        ("School lunch", "Cafeteria", "Tuesday", "Lunch", "Noodles", 4, "Cloudy", "High", 188, 181, 194, 14, "Smaller first batch"),
-        ("After-school club", "Classroom", "Thursday", "After-school", "Muffins", 3, "Normal", "Medium", 48, 42, 55, 11, "Pre-order / RSVP"),
-        ("Community event", "Outdoor field", "Sunday", "Snack / Break", "Hot dogs", 4, "Very hot", "Low", 210, 151, 230, 63, "Compost plan"),
-        ("School lunch", "Cafeteria", "Wednesday", "Lunch", "Mac and cheese", 5, "Normal", "High", 190, 195, 198, 7, "Menu popularity check"),
-        ("Sports event", "Gym / Hall", "Saturday", "Dinner", "Wraps", 3, "Rainy", "Medium", 130, 111, 145, 25, "Smaller first batch"),
+def calculate_actual_waste(food_prepared: int, leftover: int) -> float:
+    food_prepared = max(int(food_prepared), 1)
+    leftover = max(int(leftover), 0)
+    return leftover / food_prepared * 100
+
+
+def create_demo_rows(username: str) -> list[dict]:
+    base = [
+        ("School lunch", "Cafeteria", "Monday", "Lunch", "Pasta", 3, "Normal", "Medium", 118, 111, 132, 28, "None yet"),
+        ("School lunch", "Cafeteria", "Tuesday", "Lunch", "Chicken rice bowl", 5, "Sunny", "High", 120, 123, 124, 7, "Attendance confirmation"),
+        ("School lunch", "Cafeteria", "Wednesday", "Lunch", "Vegetarian chili", 2, "Cloudy", "Medium", 115, 100, 126, 34, "Menu preference survey"),
+        ("After-school club", "Classroom", "Thursday", "Snack", "Fruit cups", 4, "Normal", "High", 42, 39, 45, 6, "Pre-order form"),
+        ("Sports event", "Gym", "Friday", "Dinner", "Sandwiches", 3, "Rainy", "Low", 95, 72, 120, 43, "None yet"),
+        ("Breakfast program", "Cafeteria", "Monday", "Breakfast", "Bagels", 4, "Very cold", "Medium", 70, 58, 80, 19, "Smaller first batch"),
+        ("Community event", "Community hall", "Saturday", "All-day event", "Pizza", 5, "Sunny", "Medium", 160, 148, 170, 18, "Donation partner ready"),
+        ("Fundraiser", "Event venue", "Sunday", "Dinner", "Hot dogs", 3, "Stormy", "Low", 140, 91, 160, 62, "Compost plan"),
+        ("School lunch", "Cafeteria", "Friday", "Lunch", "Fish tacos", 2, "Normal", "Medium", 117, 99, 128, 31, "None yet"),
+        ("Donation program", "Library / common area", "Wednesday", "Snack", "Bakery items", 4, "Cloudy", "Medium", 60, 52, 70, 12, "Donation partner ready"),
+        ("School lunch", "Cafeteria", "Thursday", "Lunch", "Rice noodle bowl", 4, "Sunny", "High", 122, 121, 126, 8, "Attendance confirmation"),
+        ("Community event", "Outdoor area", "Saturday", "Lunch", "BBQ plates", 5, "Very hot", "Medium", 180, 151, 195, 39, "Smaller first batch"),
+        ("After-school club", "Classroom", "Tuesday", "Snack", "Granola bars", 5, "Normal", "High", 36, 35, 38, 2, "Pre-order form"),
+        ("School lunch", "Cafeteria", "Wednesday", "Lunch", "Mac and cheese", 5, "Normal", "High", 125, 129, 130, 5, "Attendance confirmation"),
+        ("Sports event", "Gym", "Friday", "Dinner", "Wraps", 3, "Cloudy", "Low", 110, 88, 135, 41, "None yet"),
+        ("Breakfast program", "Cafeteria", "Thursday", "Breakfast", "Oatmeal cups", 2, "Normal", "Medium", 72, 63, 82, 22, "Menu preference survey"),
     ]
 
-    for i, item in enumerate(examples):
+    rows = []
+    for i, item in enumerate(base):
         (
             event_type,
             location,
@@ -801,374 +1063,187 @@ def make_demo_rows(username: str) -> List[Dict[str, Any]]:
             leftover,
             intervention,
         ) = item
-        inputs = {
-            "event_type": event_type,
-            "location": location,
-            "day_of_week": day,
-            "meal_time": meal_time,
-            "meal_type": meal_type,
-            "menu_popularity": popularity,
-            "weather": weather,
-            "attendance_confidence": confidence,
-            "expected_attendance": expected,
-            "actual_attendance": actual,
-            "food_prepared": prepared,
-            "leftover_portions": leftover,
-            "donation_partner_available": intervention == "Donation partner on standby",
-            "donation_capacity": 30,
-            "batch_cooking_available": intervention in ["Smaller first batch", "Pre-order / RSVP"],
-            "storage_capacity": 12,
-            "cost_per_portion": 2.75,
-            "co2_per_portion": 0.5,
-        }
-        actual = actual_waste_metrics(inputs)
+
+        waste_rate = calculate_actual_waste(prepared, leftover)
+        risk_score = min(96, max(5, waste_rate * 2.5 + (prepared - actual) / max(prepared, 1) * 25))
+        risk_level = risk_level_from_score(risk_score)
+        cost = leftover * 2.5
+        co2 = leftover * 0.5
+
         rows.append(
             {
                 "Username": username,
-                "Timestamp": (base + timedelta(days=i * 3)).strftime("%Y-%m-%d %H:%M:%S"),
-                "Record Type": "Demo Actual Result",
+                "Time": (pd.Timestamp.now() - pd.Timedelta(days=20 - i)).strftime("%Y-%m-%d %H:%M:%S"),
                 "Event Type": event_type,
                 "Location": location,
                 "Day of Week": day,
                 "Meal Time": meal_time,
-                "Meal Type": meal_type,
+                "Meal / Food Type": meal_type,
                 "Menu Popularity": popularity,
                 "Weather": weather,
                 "Attendance Confidence": confidence,
                 "Expected Attendance": expected,
-                "Actual Attendance": inputs["actual_attendance"],
+                "Actual Attendance": actual,
                 "Food Prepared": prepared,
                 "Leftover Portions": leftover,
-                "Waste Rate": actual["waste_rate"],
-                "Predicted Waste Rate": np.nan,
-                "Risk Score": actual["risk_score"],
-                "Risk Level": actual["risk_level"],
-                "Recommended Min": np.nan,
-                "Recommended Max": np.nan,
-                "Donation Partner Available": bool_label(inputs["donation_partner_available"]),
-                "Donation Capacity": inputs["donation_capacity"],
-                "Batch Cooking Available": bool_label(inputs["batch_cooking_available"]),
-                "Storage Capacity": inputs["storage_capacity"],
+                "Waste Rate": round(waste_rate, 2),
+                "Predicted Waste Rate": round(waste_rate * np.random.uniform(0.82, 1.12), 2),
+                "Risk Score": round(risk_score, 1),
+                "Risk Level": risk_level,
+                "Recommended Min Portions": max(1, int(actual * 0.94)),
+                "Recommended Max Portions": max(1, int(actual * 1.05)),
+                "Donation Partner Available": "Yes" if intervention == "Donation partner ready" else "No",
+                "Batch Cooking Available": "Yes" if intervention == "Smaller first batch" else "No",
+                "Reusable Serving Available": "Yes" if i % 4 == 0 else "No",
                 "Intervention Used": intervention,
-                "Potential Meals Rescued": actual["rescued"],
-                "Estimated CO2 Kg": actual["estimated_co2"],
-                "Estimated Cost CAD": actual["estimated_cost"],
-                "Estimated Cost Saved CAD": actual["estimated_cost_saved"],
-                "Notes": "Demo record for judging and dashboard testing.",
+                "Cost per Portion": 2.5,
+                "CO2e per Portion": 0.5,
+                "Estimated Cost Impact": round(cost, 2),
+                "Estimated CO2e Impact": round(co2, 2),
+                "Potential Meals Rescued": min(leftover, 20 if intervention == "Donation partner ready" else 0),
+                "Notes": "Demo record for judging and testing.",
             }
         )
     return rows
 
 
-def add_demo_data_for_current_user() -> None:
-    username = st.session_state.get("username", "demo_school")
-    history = get_user_history(username)
-    existing_demo = history[history["Record Type"].astype(str).str.contains("Demo", na=False)]
-    if not existing_demo.empty:
-        st.info("Demo data is already loaded for this username.")
-        return
-    save_many(make_demo_rows(username))
-    st.success("Demo school cafeteria data loaded. Go to Impact Intelligence to see charts and patterns.")
-
-
-# ------------------------------------------------------------
+# -----------------------------------------------------------------------------
 # UI helpers
-# ------------------------------------------------------------
-def hero(title: str, subtitle: str, eyebrow: str = "AI FOR EVERYDAY GOOD") -> None:
+# -----------------------------------------------------------------------------
+def render_topbar() -> None:
+    username = st.session_state.get("username")
+    st.markdown(
+        f"""
+        <div class="topbar">
+            <div class="brand"><span class="brand-mark">🌿</span><span>{APP_TITLE}</span></div>
+            <div class="user-pill">Signed in as <b>{username}</b></div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def render_hero(kicker: str, title: str, subtitle: str, chips: list[str] | None = None) -> None:
+    chip_html = ""
+    if chips:
+        chip_html = '<div class="hero-chips">' + "".join([f'<span class="chip">{chip}</span>' for chip in chips]) + "</div>"
+
     st.markdown(
         f"""
         <div class="hero">
-            <div class="eyebrow">{eyebrow}</div>
-            <div class="hero-title">{title}</div>
+            <div class="eyebrow">{kicker}</div>
+            <h1>{title}</h1>
             <div class="hero-subtitle">{subtitle}</div>
+            {chip_html}
         </div>
         """,
         unsafe_allow_html=True,
     )
 
 
-def card(label: str, title: str, copy: str) -> None:
+def metric_card(label: str, value: str, caption: str = "") -> str:
+    return f"""
+    <div class="metric-card">
+        <div class="metric-label">{label}</div>
+        <div class="metric-value">{value}</div>
+        <div class="metric-caption">{caption}</div>
+    </div>
+    """
+
+
+def metric_grid(cards: list[tuple[str, str, str]]) -> None:
+    st.markdown(
+        '<div class="metric-grid">' + "".join(metric_card(*card) for card in cards) + "</div>",
+        unsafe_allow_html=True,
+    )
+
+
+def section_header(number: str, title: str) -> None:
     st.markdown(
         f"""
-        <div class="glass-card">
-            <div class="card-label">{label}</div>
-            <div class="card-title">{title}</div>
-            <div class="card-copy">{copy}</div>
+        <div class="section-title">
+            <span class="section-number">{number}</span>
+            <h2 style="margin:0;">{title}</h2>
         </div>
         """,
         unsafe_allow_html=True,
     )
 
 
-def risk_gauge(score: float, level: str) -> go.Figure:
-    color = "#AFC7A3" if level == "Low" else "#E6B85C" if level == "Medium" else "#E57373"
-    fig = go.Figure(
-        go.Indicator(
-            mode="gauge+number",
-            value=score,
-            number={"suffix": "/100", "font": {"size": 42}},
-            title={"text": f"Waste Risk Score — {level}", "font": {"size": 20}},
-            gauge={
-                "axis": {"range": [0, 100]},
-                "bar": {"color": color},
-                "bgcolor": "rgba(255,255,255,0.04)",
-                "borderwidth": 0,
-                "steps": [
-                    {"range": [0, 40], "color": "rgba(175,199,163,0.22)"},
-                    {"range": [40, 70], "color": "rgba(230,184,92,0.22)"},
-                    {"range": [70, 100], "color": "rgba(229,115,115,0.22)"},
-                ],
-            },
-        )
+def insight(text: str) -> None:
+    st.markdown(f'<div class="insight-card">{text}</div>', unsafe_allow_html=True)
+
+
+def action_card(i: int, title: str, body: str) -> None:
+    st.markdown(
+        f"""
+        <div class="action-card">
+            <div class="action-icon">{i}</div>
+            <div><b>{title}</b><br><span class="muted">{body}</span></div>
+        </div>
+        """,
+        unsafe_allow_html=True,
     )
-    fig.update_layout(
-        height=315,
-        margin=dict(l=20, r=20, t=55, b=10),
-        paper_bgcolor="rgba(0,0,0,0)",
-        font=dict(color="#F8F4EC"),
+
+
+def get_default_username_page() -> None:
+    inject_css()
+    st.markdown("<br>", unsafe_allow_html=True)
+    render_hero(
+        "High School Track · AI for Everyday Good",
+        "Food waste intelligence, made calm.",
+        (
+            "A premium environmental MVP for schools and community groups. "
+            "Predict high-risk meals, understand why waste happens, and turn leftovers into a practical rescue plan."
+        ),
+        ["AI risk scoring", "Pattern detection", "Rescue planning", "Impact dashboard"],
     )
-    return fig
 
-
-def driver_bar(drivers: List[Tuple[str, float]]) -> Optional[go.Figure]:
-    if not drivers:
-        return None
-    df = pd.DataFrame(drivers, columns=["Driver", "Points"]).sort_values("Points", ascending=True)
-    fig = px.bar(df, x="Points", y="Driver", orientation="h", text="Points")
-    fig.update_layout(
-        height=320,
-        margin=dict(l=10, r=10, t=30, b=10),
-        paper_bgcolor="rgba(0,0,0,0)",
-        plot_bgcolor="rgba(255,255,255,0.03)",
-        font=dict(color="#F8F4EC"),
-        xaxis_title="Risk contribution",
-        yaxis_title="",
-    )
-    fig.update_traces(marker_color="#C8A45D", textposition="outside")
-    return fig
-
-
-def show_action_plan(plan: Dict[str, List[str]]) -> None:
-    cols = st.columns(3)
-    for col, (phase, items) in zip(cols, plan.items()):
-        with col:
-            st.markdown(f"### {phase}")
-            for item in items:
-                st.write(f"• {item}")
-
-
-def build_report_text(inputs: Dict[str, Any], metrics: Dict[str, Any], plan: Dict[str, List[str]]) -> str:
-    lines = [
-        f"{APP_NAME} — Rescue Action Report",
-        f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M')}",
-        "",
-        "Event Snapshot",
-        f"- Event type: {inputs.get('event_type')}",
-        f"- Location: {inputs.get('location')}",
-        f"- Meal: {inputs.get('meal_type') or 'Unknown'} at {inputs.get('meal_time')}",
-        f"- Expected attendance: {inputs.get('expected_attendance')}",
-        f"- Planned food: {inputs.get('food_prepared')} portions",
-        "",
-        "AI Risk Summary",
-        f"- Waste Risk Score: {metrics.get('risk_score')}/100 ({metrics.get('risk_level')})",
-        f"- Predicted waste rate: {metrics.get('predicted_waste_rate')}%",
-        f"- Predicted attendance: {metrics.get('predicted_attendance')}",
-        f"- Recommended preparation range: {metrics.get('recommended_min')}–{metrics.get('recommended_max')} portions",
-        f"- Potential meals rescued: {metrics.get('potential_rescued')}",
-        f"- Estimated cost exposure: ${metrics.get('estimated_cost')}",
-        f"- Estimated CO2 exposure: {metrics.get('estimated_co2')} kg",
-        "",
-        "Top Risk Drivers",
-    ]
-    for driver, points in metrics.get("top_drivers", []):
-        lines.append(f"- {driver}: {points} points")
-    lines.append("")
-    lines.append("Action Plan")
-    for phase, items in plan.items():
-        lines.append(f"{phase}:")
-        for item in items:
-            lines.append(f"- {item}")
-    lines.append("")
-    lines.append(FOOD_SAFETY_NOTE)
-    return "\n".join(lines)
-
-
-def common_event_form(prefix: str, include_actuals: bool = False) -> Dict[str, Any]:
-    today_index = datetime.now().weekday()
-    col1, col2, col3 = st.columns(3)
+    col1, col2 = st.columns([1.05, 0.95], gap="large")
     with col1:
-        event_type = st.selectbox("Event type", EVENT_TYPES, key=f"{prefix}_event_type")
-        location = st.selectbox("Location", LOCATIONS, key=f"{prefix}_location")
-        day_of_week = st.selectbox("Day of week", DAYS, index=today_index, key=f"{prefix}_day")
-    with col2:
-        meal_time = st.selectbox("Meal time", MEAL_TIMES, index=1, key=f"{prefix}_meal_time")
-        meal_type = st.text_input("Meal / food type", placeholder="Example: pasta, pizza, sandwiches", key=f"{prefix}_meal")
-        weather = st.selectbox("Expected weather / condition", WEATHER_OPTIONS, key=f"{prefix}_weather")
-    with col3:
-        menu_popularity = st.slider("Menu popularity", 1, 5, 3, help="1 = unpopular, 5 = very popular", key=f"{prefix}_pop")
-        attendance_confidence = st.selectbox("Attendance confidence", ATTENDANCE_CONFIDENCE, index=1, key=f"{prefix}_confidence")
-        intervention = st.selectbox("Intervention used / planned", INTERVENTIONS, key=f"{prefix}_intervention")
-
-    st.markdown("#### Planning numbers")
-    num_cols = st.columns(4)
-    with num_cols[0]:
-        expected_attendance = st.number_input("Expected attendance", min_value=0, step=1, value=100, key=f"{prefix}_expected")
-    with num_cols[1]:
-        food_prepared = st.number_input("Food prepared / planned", min_value=0, step=1, value=110, key=f"{prefix}_prepared")
-    with num_cols[2]:
-        cost_per_portion = st.number_input("Cost per portion ($)", min_value=0.0, step=0.25, value=2.50, key=f"{prefix}_cost")
-    with num_cols[3]:
-        co2_per_portion = st.number_input("CO₂e per portion (kg)", min_value=0.0, step=0.05, value=0.50, key=f"{prefix}_co2")
-
-    actual_attendance = np.nan
-    leftover_portions = np.nan
-    if include_actuals:
-        actual_cols = st.columns(2)
-        with actual_cols[0]:
-            actual_attendance = st.number_input("Actual attendance", min_value=0, step=1, value=90, key=f"{prefix}_actual")
-        with actual_cols[1]:
-            leftover_portions = st.number_input("Leftover portions", min_value=0, step=1, value=18, key=f"{prefix}_leftover")
-
-    st.markdown("#### Rescue capacity")
-    rescue_cols = st.columns(4)
-    with rescue_cols[0]:
-        donation_partner_available = st.toggle("Donation partner available", value=False, key=f"{prefix}_donation")
-    with rescue_cols[1]:
-        donation_capacity = st.number_input("Donation capacity", min_value=0, step=1, value=20, key=f"{prefix}_donation_capacity")
-    with rescue_cols[2]:
-        batch_cooking_available = st.toggle("Batch cooking available", value=True, key=f"{prefix}_batch")
-    with rescue_cols[3]:
-        storage_capacity = st.number_input("Safe storage capacity", min_value=0, step=1, value=10, key=f"{prefix}_storage")
-
-    notes = st.text_area("Notes", placeholder="Example: exam week, club meeting changed rooms, vegetarian option unpopular...", key=f"{prefix}_notes")
-
-    return {
-        "event_type": event_type,
-        "location": location,
-        "day_of_week": day_of_week,
-        "meal_time": meal_time,
-        "meal_type": meal_type.strip() or "Unknown",
-        "menu_popularity": menu_popularity,
-        "weather": weather,
-        "attendance_confidence": attendance_confidence,
-        "expected_attendance": expected_attendance,
-        "actual_attendance": actual_attendance,
-        "food_prepared": food_prepared,
-        "leftover_portions": leftover_portions,
-        "cost_per_portion": cost_per_portion,
-        "co2_per_portion": co2_per_portion,
-        "donation_partner_available": donation_partner_available,
-        "donation_capacity": donation_capacity,
-        "batch_cooking_available": batch_cooking_available,
-        "storage_capacity": storage_capacity,
-        "intervention": intervention,
-        "notes": notes,
-    }
-
-
-def record_from_forecast(inputs: Dict[str, Any], metrics: Dict[str, Any]) -> Dict[str, Any]:
-    return {
-        "Username": st.session_state.username,
-        "Timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        "Record Type": "Forecast Scan",
-        "Event Type": inputs["event_type"],
-        "Location": inputs["location"],
-        "Day of Week": inputs["day_of_week"],
-        "Meal Time": inputs["meal_time"],
-        "Meal Type": inputs["meal_type"],
-        "Menu Popularity": inputs["menu_popularity"],
-        "Weather": inputs["weather"],
-        "Attendance Confidence": inputs["attendance_confidence"],
-        "Expected Attendance": inputs["expected_attendance"],
-        "Actual Attendance": np.nan,
-        "Food Prepared": inputs["food_prepared"],
-        "Leftover Portions": np.nan,
-        "Waste Rate": np.nan,
-        "Predicted Waste Rate": metrics["predicted_waste_rate"],
-        "Risk Score": metrics["risk_score"],
-        "Risk Level": metrics["risk_level"],
-        "Recommended Min": metrics["recommended_min"],
-        "Recommended Max": metrics["recommended_max"],
-        "Donation Partner Available": bool_label(inputs["donation_partner_available"]),
-        "Donation Capacity": inputs["donation_capacity"],
-        "Batch Cooking Available": bool_label(inputs["batch_cooking_available"]),
-        "Storage Capacity": inputs["storage_capacity"],
-        "Intervention Used": inputs["intervention"],
-        "Potential Meals Rescued": metrics["potential_rescued"],
-        "Estimated CO2 Kg": metrics["estimated_co2"],
-        "Estimated Cost CAD": metrics["estimated_cost"],
-        "Estimated Cost Saved CAD": metrics["estimated_cost_saved"],
-        "Notes": inputs["notes"],
-    }
-
-
-def record_from_actual(inputs: Dict[str, Any], actual: Dict[str, Any], forecast: Dict[str, Any]) -> Dict[str, Any]:
-    return {
-        "Username": st.session_state.username,
-        "Timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        "Record Type": "Actual Result",
-        "Event Type": inputs["event_type"],
-        "Location": inputs["location"],
-        "Day of Week": inputs["day_of_week"],
-        "Meal Time": inputs["meal_time"],
-        "Meal Type": inputs["meal_type"],
-        "Menu Popularity": inputs["menu_popularity"],
-        "Weather": inputs["weather"],
-        "Attendance Confidence": inputs["attendance_confidence"],
-        "Expected Attendance": inputs["expected_attendance"],
-        "Actual Attendance": inputs["actual_attendance"],
-        "Food Prepared": inputs["food_prepared"],
-        "Leftover Portions": inputs["leftover_portions"],
-        "Waste Rate": actual["waste_rate"],
-        "Predicted Waste Rate": forecast["predicted_waste_rate"],
-        "Risk Score": actual["risk_score"],
-        "Risk Level": actual["risk_level"],
-        "Recommended Min": forecast["recommended_min"],
-        "Recommended Max": forecast["recommended_max"],
-        "Donation Partner Available": bool_label(inputs["donation_partner_available"]),
-        "Donation Capacity": inputs["donation_capacity"],
-        "Batch Cooking Available": bool_label(inputs["batch_cooking_available"]),
-        "Storage Capacity": inputs["storage_capacity"],
-        "Intervention Used": inputs["intervention"],
-        "Potential Meals Rescued": actual["rescued"],
-        "Estimated CO2 Kg": actual["estimated_co2"],
-        "Estimated Cost CAD": actual["estimated_cost"],
-        "Estimated Cost Saved CAD": actual["estimated_cost_saved"],
-        "Notes": inputs["notes"],
-    }
-
-
-# ------------------------------------------------------------
-# Pages
-# ------------------------------------------------------------
-def show_login() -> None:
-    hero(
-        "Food Waste Rescue Radar",
-        "A premium MVP that helps schools predict food waste, detect patterns, and create realistic rescue actions before meals are wasted.",
-    )
-    col1, col2 = st.columns([1.1, 0.9])
-    with col1:
-        st.markdown("### Enter a demo username")
-        username = st.text_input("Username", placeholder="example: green_school_team")
-        if st.button("Enter Command Center", use_container_width=True):
-            username = clean_username(username)
-            if not username:
-                st.error("Please enter a username.")
-            else:
-                st.session_state.username = username
+        st.markdown('<div class="panel">', unsafe_allow_html=True)
+        st.subheader("Start a workspace")
+        username = st.text_input("Workspace name", placeholder="Example: green_school_team")
+        c1, c2 = st.columns([1, 1])
+        with c1:
+            if st.button("Enter app", use_container_width=True):
+                username = normalize_username(username)
+                if not username:
+                    st.error("Please enter a workspace name.")
+                else:
+                    st.session_state.username = username
+                    st.session_state.page = "Mission Control"
+                    st.rerun()
+        with c2:
+            if st.button("Try demo workspace", use_container_width=True):
+                st.session_state.username = "demo_green_team"
                 st.session_state.page = "Mission Control"
+                existing = get_user_history()
+                if existing.empty:
+                    save_many(create_demo_rows("demo_green_team"))
                 st.rerun()
+        st.markdown("</div>", unsafe_allow_html=True)
+
     with col2:
-        card(
-            "Built for judges",
-            "Practical, explainable, and safe",
-            "The app combines rule-based forecasting, optional historical machine learning, AI-generated action plans, and human food-safety reminders.",
+        st.markdown('<div class="panel-soft">', unsafe_allow_html=True)
+        st.markdown("### What makes it realistic")
+        st.markdown(
+            """
+            - Uses attendance, weather, menu popularity, preparation amount, and past records.
+            - Gives a recommended portion range instead of a vague warning.
+            - Separates food-waste planning from food-safety decisions.
+            - Learns from logged results when enough history exists.
+            """
         )
+        st.markdown("</div>", unsafe_allow_html=True)
+
+    st.markdown(
+        '<div class="footer-note">Responsible AI note: this app supports planning only. Human staff must inspect food, follow local food safety rules, and decide whether leftovers can be served, donated, composted, or discarded.</div>',
+        unsafe_allow_html=True,
+    )
 
 
-def show_sidebar() -> None:
-    st.sidebar.markdown(f"### ♻️ {APP_NAME}")
-    st.sidebar.caption(f"Signed in as **{st.session_state.username}**")
+def navigation() -> str:
     pages = [
         "Mission Control",
         "Waste Risk Scanner",
@@ -1176,387 +1251,728 @@ def show_sidebar() -> None:
         "Impact Intelligence",
         "Data & Export",
     ]
-    current = st.session_state.get("page", pages[0])
-    page = st.sidebar.radio("Navigation", pages, index=pages.index(current) if current in pages else 0)
-    st.session_state.page = page
-    st.sidebar.markdown("---")
-    if st.sidebar.button("Load demo data", use_container_width=True):
-        add_demo_data_for_current_user()
-    if st.sidebar.button("Switch user", use_container_width=True):
-        st.session_state.username = None
-        st.session_state.page = "Mission Control"
-        st.rerun()
-    st.sidebar.markdown("---")
-    st.sidebar.caption(FOOD_SAFETY_NOTE)
+    current = st.session_state.get("page", "Mission Control")
+    if current not in pages:
+        current = "Mission Control"
+
+    choice = st.radio(
+        "Navigation",
+        pages,
+        index=pages.index(current),
+        horizontal=True,
+        label_visibility="collapsed",
+    )
+    st.session_state.page = choice
+    return choice
 
 
-def show_mission_control() -> None:
-    hero(
-        "Food waste intelligence, not just a calculator.",
-        "Predict high-risk meals, simulate smarter preparation ranges, identify recurring waste patterns, and build realistic rescue actions for schools and community events.",
-        eyebrow="MISSION CONTROL",
+# -----------------------------------------------------------------------------
+# Pages
+# -----------------------------------------------------------------------------
+def page_mission_control() -> None:
+    render_hero(
+        "AI for Everyday Good",
+        "Predict less. Waste less. Rescue more.",
+        (
+            "A clean decision system for cafeterias, clubs, events, and donation programs. "
+            "Use the scanner before food is prepared, log real results after the event, then let the dashboard reveal patterns."
+        ),
+        ["Luxury green interface", "Simple for students", "Advanced under the hood"],
     )
 
     history = get_user_history()
-    actual = history[history["Record Type"].isin(["Actual Result", "Demo Actual Result"])].copy()
-    actual = numeric(actual, ["Waste Rate", "Leftover Portions", "Estimated CO2 Kg", "Estimated Cost CAD", "Potential Meals Rescued"])
+    history_num = to_numeric(
+        history.copy(),
+        ["Waste Rate", "Leftover Portions", "Estimated Cost Impact", "Estimated CO2e Impact", "Potential Meals Rescued"],
+    )
 
-    if actual.empty:
-        st.info("Start by loading demo data or logging your first event. The app becomes smarter as you add records.")
+    if history_num.empty:
+        metric_grid([
+            ("Records", "0", "Load demo data or log an event"),
+            ("Avg waste", "—", "No records yet"),
+            ("Meals rescued", "—", "Needs results"),
+            ("Model mode", "Starter", "Rule-based engine active"),
+        ])
     else:
-        c1, c2, c3, c4 = st.columns(4)
-        c1.metric("Actual records", f"{len(actual)}")
-        c2.metric("Average waste", f"{actual['Waste Rate'].mean():.1f}%")
-        c3.metric("Meals rescued", f"{actual['Potential Meals Rescued'].sum():.0f}")
-        c4.metric("Cost exposure", f"${actual['Estimated Cost CAD'].sum():.0f}")
+        avg_waste = history_num["Waste Rate"].mean()
+        total_left = history_num["Leftover Portions"].sum()
+        total_rescued = history_num["Potential Meals Rescued"].sum()
+        model, model_msg = train_historical_model(history_num)
+        metric_grid([
+            ("Records", f"{len(history_num)}", "Saved event results"),
+            ("Avg waste", f"{avg_waste:.1f}%", "Across logged events"),
+            ("Leftovers", f"{total_left:.0f}", "Total portions"),
+            ("Model mode", "Learning" if model else "Starter", model_msg),
+        ])
 
-    st.markdown("### What this MVP does")
-    cols = st.columns(4)
-    with cols[0]:
-        card("01 / Scan", "Predict waste risk", "Forecast risk using attendance, weather, day, menu popularity, food quantity, rescue capacity, and historical data.")
-    with cols[1]:
-        card("02 / Simulate", "Compare scenarios", "Run a What-if Simulator to see what happens if the team prepares 10% less, 20% less, or follows the smart range.")
-    with cols[2]:
-        card("03 / Rescue", "Action plan", "Generate before/during/after actions for source reduction, batch cooking, donation review, storage, and composting.")
-    with cols[3]:
-        card("04 / Learn", "Pattern detection", "Find waste hotspots by meal, day, weather, intervention, and attendance gap so teams can improve over time.")
+    col1, col2, col3 = st.columns(3, gap="medium")
+    with col1:
+        st.markdown('<div class="panel">', unsafe_allow_html=True)
+        st.markdown("### 01 · Scan")
+        st.write("Forecast waste risk before food is prepared.")
+        if st.button("Open Risk Scanner", use_container_width=True):
+            st.session_state.page = "Waste Risk Scanner"
+            st.rerun()
+        st.markdown("</div>", unsafe_allow_html=True)
 
-    st.markdown("### Competition strengths")
-    st.markdown(
-        """
-        <div class="lux-note">
-        This version is designed to match the High School Track: it identifies waste patterns, predicts where waste is likely to happen, and suggests practical interventions. It remains easy for high school students because every advanced feature is wrapped in simple forms, cards, charts, and plain-language explanations.
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
+    with col2:
+        st.markdown('<div class="panel">', unsafe_allow_html=True)
+        st.markdown("### 02 · Log")
+        st.write("Record actual attendance and leftovers after the event.")
+        if st.button("Log Event Result", use_container_width=True):
+            st.session_state.page = "Event Result Logger"
+            st.rerun()
+        st.markdown("</div>", unsafe_allow_html=True)
+
+    with col3:
+        st.markdown('<div class="panel">', unsafe_allow_html=True)
+        st.markdown("### 03 · Learn")
+        st.write("Reveal the meals, days, and events that create waste.")
+        if st.button("View Intelligence", use_container_width=True):
+            st.session_state.page = "Impact Intelligence"
+            st.rerun()
+        st.markdown("</div>", unsafe_allow_html=True)
+
+    section_header("A", "Quick setup")
+    c1, c2, c3 = st.columns(3, gap="medium")
+    with c1:
+        if st.button("Load demo data", use_container_width=True):
+            save_many(create_demo_rows(st.session_state.username))
+            st.success("Demo records added. Open Impact Intelligence to see the dashboard.")
+    with c2:
+        if st.button("Switch workspace", use_container_width=True):
+            st.session_state.username = None
+            st.session_state.page = "Mission Control"
+            st.rerun()
+    with c3:
+        if st.button("Clear this workspace data", use_container_width=True):
+            clear_user_history()
+            st.success("Workspace data cleared.")
+            st.rerun()
+
+    if not history_num.empty:
+        section_header("B", "Latest insight")
+        worst = history_num.dropna(subset=["Waste Rate"]).sort_values("Waste Rate", ascending=False).head(1)
+        if not worst.empty:
+            r = worst.iloc[0]
+            insight(
+                f"<b>Highest recent waste:</b> {r['Meal / Food Type']} at {r['Event Type']} "
+                f"had <b>{float(r['Waste Rate']):.1f}%</b> waste. "
+                f"Check whether attendance confirmation, menu preference, or batch cooking could reduce this pattern."
+            )
 
 
-def show_risk_scanner() -> None:
-    hero(
+def collect_event_inputs(prefix: str = "scan", actual: bool = False) -> dict:
+    with st.container():
+        st.markdown('<div class="panel">', unsafe_allow_html=True)
+        st.markdown("### Event essentials")
+        c1, c2, c3 = st.columns(3, gap="medium")
+
+        with c1:
+            event_type = st.selectbox("Event type", EVENT_TYPES, key=f"{prefix}_event_type")
+            location = st.selectbox("Location", LOCATIONS, key=f"{prefix}_location")
+            day = st.selectbox("Day of week", DAYS, index=4, key=f"{prefix}_day")
+
+        with c2:
+            meal_time = st.selectbox("Meal time", MEAL_TIMES, index=1, key=f"{prefix}_meal_time")
+            meal_type = st.text_input("Meal / food type", placeholder="Example: pizza, pasta, sandwiches", key=f"{prefix}_meal_type")
+            weather = st.selectbox("Expected weather / condition", WEATHER_OPTIONS, key=f"{prefix}_weather")
+
+        with c3:
+            popularity = st.slider("Menu popularity", 1, 5, 3, help="1 = unpopular, 5 = very popular", key=f"{prefix}_pop")
+            confidence = st.selectbox("Attendance confidence", CONFIDENCE_OPTIONS, index=1, key=f"{prefix}_confidence")
+            intervention = st.selectbox("Intervention planned / used", INTERVENTIONS, key=f"{prefix}_intervention")
+
+        st.markdown("### Planning numbers")
+        n1, n2, n3, n4 = st.columns(4, gap="medium")
+        with n1:
+            expected = st.number_input("Expected attendance", min_value=1, value=100, step=1, key=f"{prefix}_expected")
+        with n2:
+            prepared = st.number_input("Food prepared / planned", min_value=1, value=110, step=1, key=f"{prefix}_prepared")
+        with n3:
+            cost = st.number_input("Cost per portion ($)", min_value=0.0, value=2.50, step=0.10, format="%.2f", key=f"{prefix}_cost")
+        with n4:
+            co2 = st.number_input("CO₂e per portion (kg)", min_value=0.0, value=0.50, step=0.05, format="%.2f", key=f"{prefix}_co2")
+
+        actual_attendance = None
+        leftover = None
+        if actual:
+            a1, a2 = st.columns(2, gap="medium")
+            with a1:
+                actual_attendance = st.number_input("Actual attendance", min_value=0, value=max(1, int(expected * 0.9)), step=1, key=f"{prefix}_actual")
+            with a2:
+                leftover = st.number_input("Leftover portions", min_value=0, value=max(0, int(prepared * 0.15)), step=1, key=f"{prefix}_leftover")
+
+        with st.expander("Advanced operational signals", expanded=False):
+            e1, e2, e3 = st.columns(3, gap="medium")
+            with e1:
+                donation_available = st.toggle("Verified donation / redistribution route exists", value=False, key=f"{prefix}_donation")
+            with e2:
+                batch_cooking = st.toggle("Food can be prepared in smaller batches", value=True, key=f"{prefix}_batch")
+            with e3:
+                reusable_serving = st.toggle("Reusable / adjustable serving is available", value=False, key=f"{prefix}_reusable")
+
+            notes = st.text_area("Notes", placeholder="Example: exam week, club meeting, unpopular menu last time...", key=f"{prefix}_notes")
+        st.markdown("</div>", unsafe_allow_html=True)
+
+    return {
+        "Event Type": event_type,
+        "Location": location,
+        "Day of Week": day,
+        "Meal Time": meal_time,
+        "Meal / Food Type": meal_type.strip() if meal_type else "Unknown",
+        "Menu Popularity": int(popularity),
+        "Weather": weather,
+        "Attendance Confidence": confidence,
+        "Expected Attendance": int(expected),
+        "Actual Attendance": actual_attendance,
+        "Food Prepared": int(prepared),
+        "Leftover Portions": leftover,
+        "Donation Partner Available": "Yes" if donation_available else "No",
+        "Batch Cooking Available": "Yes" if batch_cooking else "No",
+        "Reusable Serving Available": "Yes" if reusable_serving else "No",
+        "Intervention Used": intervention,
+        "Cost per Portion": float(cost),
+        "CO2e per Portion": float(co2),
+        "Notes": notes,
+    }
+
+
+def page_waste_risk_scanner() -> None:
+    render_hero(
+        "Pre-event planning",
         "Waste Risk Scanner",
-        "Use this before a cafeteria lunch, school club event, fundraiser, or donation program to predict waste risk and choose a smarter preparation range.",
-        eyebrow="PREDICT BEFORE WASTE HAPPENS",
+        (
+            "Enter a simple food plan. The scanner estimates the risk of over-preparation, "
+            "recommends a smarter portion range, and builds an action plan that students can actually use."
+        ),
+        ["Before the event", "AI + rules + history", "What-if simulator"],
     )
+
+    inputs = collect_event_inputs("scan", actual=False)
 
     history = get_user_history()
-    with st.form("risk_scan_form"):
-        inputs = common_event_form("scan", include_actuals=False)
-        submitted = st.form_submit_button("Run AI Waste Risk Scan", use_container_width=True)
+    model, model_msg = train_historical_model(history)
 
-    if submitted:
-        if inputs["expected_attendance"] <= 0 or inputs["food_prepared"] <= 0:
-            st.error("Expected attendance and food prepared must be greater than 0.")
-            return
+    if st.button("Scan this food plan", use_container_width=True):
+        result = calculate_rule_based_prediction(
+            event_type=inputs["Event Type"],
+            location=inputs["Location"],
+            day_of_week=inputs["Day of Week"],
+            meal_time=inputs["Meal Time"],
+            meal_type=inputs["Meal / Food Type"],
+            menu_popularity=inputs["Menu Popularity"],
+            weather=inputs["Weather"],
+            confidence=inputs["Attendance Confidence"],
+            expected_attendance=inputs["Expected Attendance"],
+            food_prepared=inputs["Food Prepared"],
+            donation_available=inputs["Donation Partner Available"] == "Yes",
+            batch_cooking=inputs["Batch Cooking Available"] == "Yes",
+            reusable_serving=inputs["Reusable Serving Available"] == "Yes",
+            intervention=inputs["Intervention Used"],
+            history=history,
+        )
 
-        metrics = evaluate_event(inputs, history)
-        plan = build_action_plan(inputs, metrics)
-        st.session_state["last_forecast"] = {"inputs": inputs, "metrics": metrics, "plan": plan}
+        ml_pred = predict_with_historical_model(model, inputs)
+        if ml_pred is not None:
+            blended_pred = result["predicted_waste_rate"] * 0.55 + ml_pred * 0.45
+            result["predicted_waste_rate"] = round(float(np.clip(blended_pred, 0, 100)), 1)
+            result["risk_score"] = round(float(np.clip(result["risk_score"] * 0.65 + blended_pred * 1.6 * 0.35, 5, 96)), 1)
+            result["risk_level"] = risk_level_from_score(result["risk_score"])
+            model_label = f"Historical learning active · model predicts {ml_pred:.1f}% waste"
+        else:
+            model_label = model_msg
 
-        left, right = st.columns([0.92, 1.08])
-        with left:
-            st.plotly_chart(risk_gauge(metrics["risk_score"], metrics["risk_level"]), use_container_width=True)
-        with right:
-            m1, m2, m3 = st.columns(3)
-            m1.metric("Predicted waste", f"{metrics['predicted_waste_rate']}%")
-            m2.metric("Smart range", f"{metrics['recommended_min']}–{metrics['recommended_max']}")
-            m3.metric("Potential rescued", f"{metrics['potential_rescued']:.0f}")
-            st.markdown(f"**Model mode:** {metrics['model_mode']}")
-            st.markdown(
-                f"The scanner estimates **{metrics['predicted_attendance']} attendees** and **{metrics['predicted_consumption']} consumed portions** based on the event context."
+        section_header("1", "Risk result")
+        st.markdown(risk_badge(result["risk_level"]), unsafe_allow_html=True)
+        metric_grid([
+            ("Risk score", f"{result['risk_score']:.0f}/100", "Higher means more likely to waste"),
+            ("Predicted waste", f"{result['predicted_waste_rate']:.1f}%", "Estimated before the event"),
+            ("Recommended prep", f"{result['recommended_min']}–{result['recommended_max']}", "Suggested portion range"),
+            ("Model mode", "Learning" if ml_pred is not None else "Starter", model_label),
+        ])
+
+        section_header("2", "Why this is happening")
+        for item in result["drivers"]:
+            insight(item)
+
+        section_header("3", "Rescue action plan")
+        actions = generate_action_plan(
+            result,
+            inputs["Donation Partner Available"] == "Yes",
+            inputs["Batch Cooking Available"] == "Yes",
+            inputs["Intervention Used"],
+        )
+        for i, (title, body) in enumerate(actions, start=1):
+            action_card(i, title, body)
+
+        section_header("4", "What-if simulator")
+        st.write("Compare the current plan against a lower-waste prep range.")
+        min_sim = max(1, int(inputs["Expected Attendance"] * 0.65))
+        max_sim = max(min_sim + 1, int(inputs["Expected Attendance"] * 1.45))
+        selected = st.slider(
+            "Test a different preparation amount",
+            min_value=min_sim,
+            max_value=max_sim,
+            value=int(inputs["Food Prepared"]),
+            step=1,
+            key="what_if_slider",
+        )
+
+        sim_rows = []
+        for portions in range(min_sim, max_sim + 1):
+            sim_result = calculate_rule_based_prediction(
+                event_type=inputs["Event Type"],
+                location=inputs["Location"],
+                day_of_week=inputs["Day of Week"],
+                meal_time=inputs["Meal Time"],
+                meal_type=inputs["Meal / Food Type"],
+                menu_popularity=inputs["Menu Popularity"],
+                weather=inputs["Weather"],
+                confidence=inputs["Attendance Confidence"],
+                expected_attendance=inputs["Expected Attendance"],
+                food_prepared=portions,
+                donation_available=inputs["Donation Partner Available"] == "Yes",
+                batch_cooking=inputs["Batch Cooking Available"] == "Yes",
+                reusable_serving=inputs["Reusable Serving Available"] == "Yes",
+                intervention=inputs["Intervention Used"],
+                history=history,
             )
-            if metrics["shortage_risk_portions"] > 0:
-                st.warning(f"Shortage watch: this plan may be about {metrics['shortage_risk_portions']:.0f} portions below predicted demand.")
-            st.caption(FOOD_SAFETY_NOTE)
+            shortage = max(sim_result["predicted_demand"] - portions, 0)
+            sim_rows.append(
+                {
+                    "Prepared Portions": portions,
+                    "Predicted Waste %": sim_result["predicted_waste_rate"],
+                    "Estimated Leftovers": sim_result["predicted_leftover"],
+                    "Shortage Risk Portions": shortage,
+                }
+            )
 
-        st.markdown("### Top risk drivers")
-        fig = driver_bar(metrics["top_drivers"])
-        if fig:
+        sim_df = pd.DataFrame(sim_rows)
+        selected_row = sim_df[sim_df["Prepared Portions"] == selected].iloc[0]
+        metric_grid([
+            ("Tested prep", f"{selected}", "Portions"),
+            ("Waste estimate", f"{selected_row['Predicted Waste %']:.1f}%", "For tested prep"),
+            ("Leftovers", f"{selected_row['Estimated Leftovers']:.0f}", "Estimated portions"),
+            ("Shortage risk", f"{selected_row['Shortage Risk Portions']:.0f}", "Estimated portions"),
+        ])
+
+        if PLOTLY_AVAILABLE:
+            fig = go.Figure()
+            fig.add_trace(
+                go.Scatter(
+                    x=sim_df["Prepared Portions"],
+                    y=sim_df["Predicted Waste %"],
+                    mode="lines",
+                    name="Predicted waste %",
+                    line=dict(color="#1F7A4D", width=4),
+                    fill="tozeroy",
+                    fillcolor="rgba(31,122,77,0.12)",
+                )
+            )
+            fig.add_vline(x=result["recommended_min"], line_width=2, line_dash="dash", line_color="#B9903D")
+            fig.add_vline(x=result["recommended_max"], line_width=2, line_dash="dash", line_color="#B9903D")
+            fig.update_layout(
+                height=360,
+                margin=dict(l=10, r=10, t=20, b=10),
+                paper_bgcolor="rgba(0,0,0,0)",
+                plot_bgcolor="rgba(255,255,250,0.55)",
+                font=dict(color="#153729"),
+                xaxis_title="Prepared portions",
+                yaxis_title="Predicted waste rate",
+            )
             st.plotly_chart(fig, use_container_width=True)
         else:
-            st.success("No major risk drivers detected.")
+            st.line_chart(sim_df.set_index("Prepared Portions")["Predicted Waste %"])
 
-        st.markdown("### Rescue Action Plan")
-        show_action_plan(plan)
+        section_header("5", "Optional AI coach")
+        ai_prompt = f"""
+        Create a concise food waste prevention plan for this school/community event.
+        Keep it practical for high school students.
 
-        st.markdown("### What-if Simulator")
-        scenarios = scenario_table(inputs, history)
-        st.dataframe(scenarios, use_container_width=True, hide_index=True)
-        fig = px.scatter(
-            scenarios,
-            x="Prepared Portions",
-            y="Predicted Waste Rate",
-            size="Risk Score",
-            color="Risk Level",
-            hover_name="Scenario",
-            title="Preparation level vs predicted waste",
-        )
-        fig.update_layout(paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(255,255,255,0.03)", font=dict(color="#F8F4EC"))
-        st.plotly_chart(fig, use_container_width=True)
-
-        report_text = build_report_text(inputs, metrics, plan)
-        dl1, dl2 = st.columns(2)
-        with dl1:
-            if st.button("Save this forecast to dashboard", use_container_width=True):
-                save_record(record_from_forecast(inputs, metrics))
-                st.success("Forecast saved.")
-        with dl2:
-            st.download_button(
-                "Download Rescue Action Report",
-                data=report_text,
-                file_name="food_waste_rescue_report.txt",
-                mime="text/plain",
-                use_container_width=True,
-            )
-
-        st.markdown("### Optional Groq AI Coach")
-        prompt = f"""
-        Create a concise rescue plan for a school/community organizer using this data.
-        Use this format exactly:
-        1. Risk diagnosis
-        2. Why waste may happen
-        3. Smart preparation plan
-        4. Redistribution / storage / compost plan
-        5. Human food-safety reminder
-
-        Inputs: {inputs}
-        Metrics: {metrics}
-        {FOOD_SAFETY_NOTE}
+        Data:
+        {json.dumps({**inputs, **result}, indent=2)}
         """
-        ai = ask_ai(prompt)
-        if ai:
-            st.write(ai)
+        ai_answer = ask_ai(ai_prompt)
+        if ai_answer:
+            st.markdown('<div class="panel-soft">', unsafe_allow_html=True)
+            st.write(ai_answer)
+            st.markdown("</div>", unsafe_allow_html=True)
         else:
-            st.info("Groq API key is not set, so the app used its built-in risk engine and action planner. Add GROQ_API_KEY in Streamlit Secrets to enable the AI Coach.")
+            st.info("AI Coach is optional. Add GROQ_API_KEY in Streamlit Secrets to enable it. The app still runs with the built-in risk engine.")
+
+        st.markdown(
+            '<div class="footer-note">Responsible AI note: predicted leftovers are planning estimates only. Human staff must inspect food and follow local food safety rules before donation, reuse, composting, or disposal.</div>',
+            unsafe_allow_html=True,
+        )
 
 
-def show_event_logger() -> None:
-    hero(
+def page_event_result_logger() -> None:
+    render_hero(
+        "Learn from real results",
         "Event Result Logger",
-        "Use this after an event to record actual attendance and leftovers. These records power the dashboard and unlock the historical learning model.",
-        eyebrow="LEARN FROM REAL RESULTS",
+        (
+            "Use this after an event to save what actually happened. These records power pattern detection, impact reporting, and the historical learning model."
+        ),
+        ["After the event", "Actual leftovers", "Dashboard data"],
     )
 
-    history = get_user_history()
-    with st.form("actual_logger_form"):
-        inputs = common_event_form("actual", include_actuals=True)
-        submitted = st.form_submit_button("Analyze and Save Actual Result", use_container_width=True)
+    inputs = collect_event_inputs("logger", actual=True)
 
-    if submitted:
-        if inputs["food_prepared"] <= 0:
-            st.error("Food prepared must be greater than 0.")
-            return
-        if inputs["leftover_portions"] > inputs["food_prepared"]:
+    if st.button("Save event result", use_container_width=True):
+        food_prepared = int(inputs["Food Prepared"])
+        leftover = int(inputs["Leftover Portions"] or 0)
+        actual_attendance = int(inputs["Actual Attendance"] or 0)
+
+        if leftover > food_prepared:
             st.error("Leftover portions cannot be greater than food prepared.")
             return
 
-        forecast = evaluate_event(inputs, history)
-        actual = actual_waste_metrics(inputs)
-        plan = build_action_plan(inputs, forecast)
-        save_record(record_from_actual(inputs, actual, forecast))
-
-        st.success("Actual result saved to the dashboard.")
-        c1, c2, c3, c4 = st.columns(4)
-        c1.metric("Actual waste rate", f"{actual['waste_rate']}%")
-        c2.metric("Risk level", actual["risk_level"])
-        c3.metric("Attendance gap", f"{actual['attendance_gap']:.0f}")
-        c4.metric("Cost exposure", f"${actual['estimated_cost']:.0f}")
-
-        st.markdown("### Impact Receipt")
-        receipt = pd.DataFrame(
-            [
-                ["Leftover portions", inputs["leftover_portions"]],
-                ["Potential meals rescued", actual["rescued"]],
-                ["Estimated discard after rescue", actual["discarded_estimate"]],
-                ["Estimated CO₂e exposure", f"{actual['estimated_co2']} kg"],
-                ["Estimated cost saved through rescue", f"${actual['estimated_cost_saved']}"] ,
-            ],
-            columns=["Metric", "Value"],
+        history = get_user_history()
+        result = calculate_rule_based_prediction(
+            event_type=inputs["Event Type"],
+            location=inputs["Location"],
+            day_of_week=inputs["Day of Week"],
+            meal_time=inputs["Meal Time"],
+            meal_type=inputs["Meal / Food Type"],
+            menu_popularity=inputs["Menu Popularity"],
+            weather=inputs["Weather"],
+            confidence=inputs["Attendance Confidence"],
+            expected_attendance=inputs["Expected Attendance"],
+            food_prepared=food_prepared,
+            donation_available=inputs["Donation Partner Available"] == "Yes",
+            batch_cooking=inputs["Batch Cooking Available"] == "Yes",
+            reusable_serving=inputs["Reusable Serving Available"] == "Yes",
+            intervention=inputs["Intervention Used"],
+            history=history,
         )
-        st.dataframe(receipt, hide_index=True, use_container_width=True)
 
-        if actual["waste_rate"] >= 25:
-            st.warning("This was a high-waste event. Use the action plan below before the next similar event.")
-        elif actual["waste_rate"] >= 10:
-            st.warning("This was a medium-waste event. Small planning changes may reduce waste next time.")
+        waste_rate = calculate_actual_waste(food_prepared, leftover)
+        risk_score = float(np.clip(waste_rate * 2.45 + max(food_prepared - actual_attendance, 0) / max(food_prepared, 1) * 22, 5, 96))
+        risk_level = risk_level_from_score(risk_score)
+        cost_impact = leftover * float(inputs["Cost per Portion"])
+        co2_impact = leftover * float(inputs["CO2e per Portion"])
+        potential_rescued = min(leftover, 20 if inputs["Donation Partner Available"] == "Yes" else 0)
+
+        row = {
+            "Username": st.session_state.username,
+            "Time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            **inputs,
+            "Waste Rate": round(waste_rate, 2),
+            "Predicted Waste Rate": result["predicted_waste_rate"],
+            "Risk Score": round(risk_score, 1),
+            "Risk Level": risk_level,
+            "Recommended Min Portions": result["recommended_min"],
+            "Recommended Max Portions": result["recommended_max"],
+            "Estimated Cost Impact": round(cost_impact, 2),
+            "Estimated CO2e Impact": round(co2_impact, 2),
+            "Potential Meals Rescued": int(potential_rescued),
+        }
+        save_record(row)
+
+        st.success("Event result saved.")
+        section_header("1", "Impact receipt")
+        st.markdown(risk_badge(risk_level), unsafe_allow_html=True)
+        attendance_gap = int(inputs["Expected Attendance"]) - actual_attendance
+        metric_grid([
+            ("Actual waste", f"{waste_rate:.1f}%", "Leftover / prepared"),
+            ("Attendance gap", f"{attendance_gap}", "Expected minus actual"),
+            ("Cost impact", f"${cost_impact:.0f}", "Estimated"),
+            ("CO₂e impact", f"{co2_impact:.1f} kg", "Estimated"),
+        ])
+
+        if waste_rate >= 25:
+            insight("This event should be reviewed. The highest-value next step is to reduce the first batch and confirm attendance closer to the event.")
+        elif waste_rate >= 10:
+            insight("This event had moderate waste. Try a smaller buffer, pre-orders, or menu preference tracking next time.")
         else:
-            st.success("This event performed well. Keep tracking to confirm the pattern.")
-
-        st.markdown("### Next-time action plan")
-        show_action_plan(plan)
-        st.caption(FOOD_SAFETY_NOTE)
+            insight("This result is strong. Keep tracking it so the app can learn what low-waste planning looks like.")
 
 
-def show_dashboard() -> None:
-    hero(
+def page_impact_intelligence() -> None:
+    render_hero(
+        "Pattern detection",
         "Impact Intelligence",
-        "Find waste hotspots, measure the effect of interventions, and turn messy event records into clear decisions.",
-        eyebrow="PATTERN DETECTION DASHBOARD",
+        (
+            "A dashboard that turns event logs into environmental, cost, and planning insights. "
+            "Use this page to prove that the MVP understands impact, not just inputs."
+        ),
+        ["Patterns", "Charts", "Intervention ROI", "Historical learning"],
     )
 
     history = get_user_history()
     if history.empty:
-        st.info("No records yet. Load demo data from the sidebar or log an event first.")
+        st.info("No records yet. Load demo data from Mission Control or log an event result.")
         return
 
-    df = numeric(
-        history,
-        [
-            "Waste Rate",
-            "Predicted Waste Rate",
-            "Risk Score",
-            "Expected Attendance",
-            "Actual Attendance",
-            "Food Prepared",
-            "Leftover Portions",
-            "Potential Meals Rescued",
-            "Estimated CO2 Kg",
-            "Estimated Cost CAD",
-            "Estimated Cost Saved CAD",
-            "Menu Popularity",
-        ],
+    num_cols = [
+        "Expected Attendance",
+        "Actual Attendance",
+        "Food Prepared",
+        "Leftover Portions",
+        "Waste Rate",
+        "Predicted Waste Rate",
+        "Risk Score",
+        "Estimated Cost Impact",
+        "Estimated CO2e Impact",
+        "Potential Meals Rescued",
+    ]
+    history = to_numeric(history.copy(), num_cols)
+    history["Time"] = pd.to_datetime(history["Time"], errors="coerce")
+    history = history.sort_values("Time")
+
+    total_records = len(history)
+    avg_waste = history["Waste Rate"].mean()
+    total_cost = history["Estimated Cost Impact"].sum()
+    total_co2 = history["Estimated CO2e Impact"].sum()
+    total_rescued = history["Potential Meals Rescued"].sum()
+
+    metric_grid([
+        ("Records", f"{total_records}", "Logged events"),
+        ("Average waste", f"{avg_waste:.1f}%", "Across records"),
+        ("Cost impact", f"${total_cost:.0f}", "Estimated waste cost"),
+        ("Meals rescued", f"{total_rescued:.0f}", "Potential portions"),
+    ])
+
+    model, model_msg = train_historical_model(history)
+    insight(f"<b>Model status:</b> {model_msg}.")
+
+    c1, c2 = st.columns([1.1, 0.9], gap="large")
+    with c1:
+        section_header("1", "Waste trend")
+        if PLOTLY_AVAILABLE:
+            chart_df = history.dropna(subset=["Time", "Waste Rate"])
+            fig = go.Figure()
+            fig.add_trace(
+                go.Scatter(
+                    x=chart_df["Time"],
+                    y=chart_df["Waste Rate"],
+                    mode="lines+markers",
+                    name="Waste rate",
+                    line=dict(color="#1F7A4D", width=4),
+                    marker=dict(size=8, color="#B9903D"),
+                )
+            )
+            fig.update_layout(
+                height=350,
+                margin=dict(l=10, r=10, t=20, b=10),
+                paper_bgcolor="rgba(0,0,0,0)",
+                plot_bgcolor="rgba(255,255,250,0.55)",
+                font=dict(color="#153729"),
+                xaxis_title="Date",
+                yaxis_title="Waste rate %",
+            )
+            st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.line_chart(history.set_index("Time")["Waste Rate"])
+
+    with c2:
+        section_header("2", "Risk mix")
+        mix = history["Risk Level"].fillna("Unknown").value_counts().reset_index()
+        mix.columns = ["Risk Level", "Events"]
+        if PLOTLY_AVAILABLE and not mix.empty:
+            fig = px.pie(
+                mix,
+                values="Events",
+                names="Risk Level",
+                hole=0.62,
+                color="Risk Level",
+                color_discrete_map={"Low": "#1F7A4D", "Medium": "#B9903D", "High": "#B85C4B"},
+            )
+            fig.update_layout(
+                height=350,
+                margin=dict(l=10, r=10, t=20, b=10),
+                paper_bgcolor="rgba(0,0,0,0)",
+                font=dict(color="#153729"),
+                showlegend=True,
+            )
+            st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.dataframe(mix, use_container_width=True)
+
+    section_header("3", "Waste drivers")
+    g1, g2 = st.columns(2, gap="large")
+
+    with g1:
+        meal_chart = history.groupby("Meal / Food Type", dropna=False)["Waste Rate"].mean().sort_values(ascending=False).head(8)
+        st.markdown('<div class="panel">', unsafe_allow_html=True)
+        st.markdown("### Highest-waste foods")
+        if PLOTLY_AVAILABLE and not meal_chart.empty:
+            fig = px.bar(
+                meal_chart.reset_index(),
+                x="Waste Rate",
+                y="Meal / Food Type",
+                orientation="h",
+                color="Waste Rate",
+                color_continuous_scale=["#DCEBDD", "#1F7A4D", "#123D2B"],
+            )
+            fig.update_layout(
+                height=360,
+                margin=dict(l=10, r=10, t=20, b=10),
+                paper_bgcolor="rgba(0,0,0,0)",
+                plot_bgcolor="rgba(255,255,250,0.50)",
+                font=dict(color="#153729"),
+                coloraxis_showscale=False,
+            )
+            st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.bar_chart(meal_chart)
+        st.markdown("</div>", unsafe_allow_html=True)
+
+    with g2:
+        day_chart = history.groupby("Day of Week", dropna=False)["Waste Rate"].mean().reindex(DAYS).dropna()
+        st.markdown('<div class="panel">', unsafe_allow_html=True)
+        st.markdown("### Waste by day")
+        if PLOTLY_AVAILABLE and not day_chart.empty:
+            fig = px.bar(
+                day_chart.reset_index(),
+                x="Day of Week",
+                y="Waste Rate",
+                color="Waste Rate",
+                color_continuous_scale=["#DCEBDD", "#1F7A4D", "#123D2B"],
+            )
+            fig.update_layout(
+                height=360,
+                margin=dict(l=10, r=10, t=20, b=10),
+                paper_bgcolor="rgba(0,0,0,0)",
+                plot_bgcolor="rgba(255,255,250,0.50)",
+                font=dict(color="#153729"),
+                coloraxis_showscale=False,
+            )
+            st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.bar_chart(day_chart)
+        st.markdown("</div>", unsafe_allow_html=True)
+
+    section_header("4", "Intervention signal")
+    intervention = history.groupby("Intervention Used", dropna=False)["Waste Rate"].agg(["count", "mean"]).sort_values("mean")
+    intervention = intervention.rename(columns={"count": "Events", "mean": "Avg Waste Rate"})
+    st.dataframe(intervention, use_container_width=True)
+
+    if not intervention.empty:
+        best = intervention.head(1).index[0]
+        worst = intervention.tail(1).index[0]
+        insight(f"<b>Best current intervention:</b> {best}. <b>Highest-waste category:</b> {worst}. Use this as a discussion point, not a final conclusion, because small datasets can be noisy.")
+
+    section_header("5", "Recent records")
+    display_cols = [
+        "Time",
+        "Event Type",
+        "Meal / Food Type",
+        "Day of Week",
+        "Expected Attendance",
+        "Actual Attendance",
+        "Food Prepared",
+        "Leftover Portions",
+        "Waste Rate",
+        "Risk Level",
+        "Intervention Used",
+    ]
+    st.dataframe(history[display_cols].tail(12), use_container_width=True)
+
+
+def create_report(history: pd.DataFrame) -> str:
+    if history.empty:
+        return "No records available yet."
+
+    history = to_numeric(
+        history.copy(),
+        ["Waste Rate", "Leftover Portions", "Estimated Cost Impact", "Estimated CO2e Impact", "Potential Meals Rescued"],
     )
-    df["Timestamp Parsed"] = pd.to_datetime(df["Timestamp"], errors="coerce")
-    actual = df[df["Record Type"].isin(["Actual Result", "Demo Actual Result"])].copy()
-    forecasts = df[df["Record Type"].astype(str).str.contains("Forecast", na=False)].copy()
+    avg = history["Waste Rate"].mean()
+    total_left = history["Leftover Portions"].sum()
+    total_cost = history["Estimated Cost Impact"].sum()
+    total_co2 = history["Estimated CO2e Impact"].sum()
+    total_rescued = history["Potential Meals Rescued"].sum()
 
-    c1, c2, c3, c4, c5 = st.columns(5)
-    c1.metric("Records", f"{len(df)}")
-    c2.metric("Actual avg waste", "—" if actual.empty else f"{actual['Waste Rate'].mean():.1f}%")
-    c3.metric("Forecasts", f"{len(forecasts)}")
-    c4.metric("Meals rescued", "—" if actual.empty else f"{actual['Potential Meals Rescued'].sum():.0f}")
-    c5.metric("Cost exposure", "—" if actual.empty else f"${actual['Estimated Cost CAD'].sum():.0f}")
+    worst_meal = history.groupby("Meal / Food Type")["Waste Rate"].mean().sort_values(ascending=False).head(1)
+    worst_day = history.groupby("Day of Week")["Waste Rate"].mean().sort_values(ascending=False).head(1)
 
-    if not actual.empty:
-        actual = actual.sort_values("Timestamp Parsed")
-        st.markdown("### Waste trend over time")
-        fig = px.line(actual, x="Timestamp Parsed", y="Waste Rate", markers=True, color="Event Type")
-        fig.update_layout(paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(255,255,255,0.03)", font=dict(color="#F8F4EC"), xaxis_title="Date")
-        st.plotly_chart(fig, use_container_width=True)
+    lines = [
+        "# Food Waste Rescue Radar · Impact Report",
+        "",
+        f"Workspace: {st.session_state.username}",
+        f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M')}",
+        "",
+        "## Summary",
+        f"- Total logged events: {len(history)}",
+        f"- Average waste rate: {avg:.1f}%",
+        f"- Total leftover portions: {total_left:.0f}",
+        f"- Estimated cost impact: ${total_cost:.0f}",
+        f"- Estimated CO₂e impact: {total_co2:.1f} kg",
+        f"- Potential meals rescued: {total_rescued:.0f}",
+        "",
+        "## Pattern insights",
+    ]
 
-        col1, col2 = st.columns(2)
-        with col1:
-            st.markdown("### Worst meal types")
-            meal = actual.groupby("Meal Type", dropna=False)["Waste Rate"].mean().sort_values(ascending=False).head(8).reset_index()
-            fig = px.bar(meal, x="Waste Rate", y="Meal Type", orientation="h", text="Waste Rate")
-            fig.update_traces(marker_color="#C8A45D", texttemplate="%{text:.1f}%")
-            fig.update_layout(paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(255,255,255,0.03)", font=dict(color="#F8F4EC"))
-            st.plotly_chart(fig, use_container_width=True)
-        with col2:
-            st.markdown("### Waste by day")
-            day = actual.groupby("Day of Week", dropna=False)["Waste Rate"].mean().reindex(DAYS).dropna().reset_index()
-            fig = px.bar(day, x="Day of Week", y="Waste Rate", text="Waste Rate")
-            fig.update_traces(marker_color="#AFC7A3", texttemplate="%{text:.1f}%")
-            fig.update_layout(paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(255,255,255,0.03)", font=dict(color="#F8F4EC"))
-            st.plotly_chart(fig, use_container_width=True)
+    if not worst_meal.empty:
+        lines.append(f"- Highest-waste food type: {worst_meal.index[0]} ({worst_meal.iloc[0]:.1f}% average waste)")
+    if not worst_day.empty:
+        lines.append(f"- Highest-waste day: {worst_day.index[0]} ({worst_day.iloc[0]:.1f}% average waste)")
 
-        st.markdown("### Hotspot heatmap")
-        heat = actual.pivot_table(values="Waste Rate", index="Day of Week", columns="Meal Time", aggfunc="mean").reindex(DAYS)
-        fig = px.imshow(heat, text_auto=".1f", aspect="auto", color_continuous_scale="RdYlGn_r")
-        fig.update_layout(paper_bgcolor="rgba(0,0,0,0)", font=dict(color="#F8F4EC"))
-        st.plotly_chart(fig, use_container_width=True)
+    lines.extend(
+        [
+            "",
+            "## Recommended next actions",
+            "- Confirm attendance 24 hours before food preparation.",
+            "- Use smaller first batches for high-risk events.",
+            "- Track menu popularity and compare it with leftover patterns.",
+            "- Prepare a verified donation, redistribution, or compost route before large events.",
+            "- Keep human food-safety review separate from AI planning recommendations.",
+            "",
+            "Responsible AI note: This report supports planning only. Human staff must follow local food safety rules.",
+        ]
+    )
 
-        st.markdown("### Intervention effectiveness")
-        intervention = actual.groupby("Intervention Used", dropna=False).agg(
-            Average_Waste=("Waste Rate", "mean"),
-            Records=("Waste Rate", "count"),
-            Meals_Rescued=("Potential Meals Rescued", "sum"),
-        ).sort_values("Average_Waste")
-        st.dataframe(intervention, use_container_width=True)
-
-        st.markdown("### Pattern insights")
-        worst_meal = actual.groupby("Meal Type")["Waste Rate"].mean().sort_values(ascending=False).head(1)
-        worst_day = actual.groupby("Day of Week")["Waste Rate"].mean().sort_values(ascending=False).head(1)
-        worst_weather = actual.groupby("Weather")["Waste Rate"].mean().sort_values(ascending=False).head(1)
-        insights = []
-        if not worst_meal.empty:
-            insights.append(f"Most waste-prone meal: **{worst_meal.index[0]}** with an average waste rate of **{worst_meal.iloc[0]:.1f}%**.")
-        if not worst_day.empty:
-            insights.append(f"Highest-risk day: **{worst_day.index[0]}** with an average waste rate of **{worst_day.iloc[0]:.1f}%**.")
-        if not worst_weather.empty:
-            insights.append(f"Weather condition linked to highest waste: **{worst_weather.index[0]}** at **{worst_weather.iloc[0]:.1f}%** average waste.")
-        corr_df = actual.dropna(subset=["Menu Popularity", "Waste Rate"])
-        if len(corr_df) >= 5:
-            corr = corr_df["Menu Popularity"].corr(corr_df["Waste Rate"])
-            if pd.notna(corr):
-                direction = "lower" if corr < 0 else "higher"
-                insights.append(f"Menu popularity appears linked to waste: {direction} popularity is associated with more waste in your current records.")
-        for insight in insights:
-            st.write(f"• {insight}")
-
-    st.markdown("### Recent records")
-    st.dataframe(df.sort_values("Timestamp Parsed", ascending=False).drop(columns=["Timestamp Parsed"]), use_container_width=True, hide_index=True)
+    return "\n".join(lines)
 
 
-def show_data_export() -> None:
-    hero(
+def page_data_export() -> None:
+    render_hero(
+        "Evidence and reporting",
         "Data & Export",
-        "Manage demo records, download CSV data, and generate a simple organization impact summary.",
-        eyebrow="DATA OPERATIONS",
+        (
+            "Review the raw records, download CSV data, and generate a clean markdown report for presentations or judging."
+        ),
+        ["CSV export", "Impact report", "Transparent data"],
     )
 
     history = get_user_history()
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        if st.button("Load demo data", use_container_width=True):
-            add_demo_data_for_current_user()
-    with col2:
+    if history.empty:
+        st.info("No records yet. Load demo data or log event results first.")
+        return
+
+    section_header("1", "Data table")
+    st.dataframe(history.tail(50), use_container_width=True)
+
+    csv = history.to_csv(index=False).encode("utf-8")
+    report = create_report(history).encode("utf-8")
+
+    c1, c2 = st.columns(2, gap="medium")
+    with c1:
         st.download_button(
-            "Download my CSV",
-            data=history.to_csv(index=False),
-            file_name="food_waste_history.csv",
+            "Download CSV data",
+            data=csv,
+            file_name=f"{st.session_state.username}_food_waste_data.csv",
             mime="text/csv",
             use_container_width=True,
-            disabled=history.empty,
         )
-    with col3:
-        if st.button("Clear my records", use_container_width=True):
-            all_history = load_history()
-            all_history = all_history[all_history["Username"].astype(str) != st.session_state.username]
-            all_history.to_csv(HISTORY_FILE, index=False)
-            st.success("Your records were cleared.")
-            st.rerun()
-
-    if history.empty:
-        st.info("No data yet.")
-        return
-
-    df = numeric(history, ["Waste Rate", "Potential Meals Rescued", "Estimated CO2 Kg", "Estimated Cost CAD", "Estimated Cost Saved CAD"])
-    actual = df[df["Record Type"].isin(["Actual Result", "Demo Actual Result"])].copy()
-
-    if not actual.empty:
-        summary = f"""{APP_NAME} — Organization Impact Summary
-Generated: {datetime.now().strftime('%Y-%m-%d %H:%M')}
-
-Records analyzed: {len(actual)} actual events
-Average waste rate: {actual['Waste Rate'].mean():.1f}%
-Total leftover portions: {actual['Leftover Portions'].sum():.0f}
-Potential meals rescued: {actual['Potential Meals Rescued'].sum():.0f}
-Estimated CO2e exposure tracked: {actual['Estimated CO2 Kg'].sum():.1f} kg
-Estimated cost exposure tracked: ${actual['Estimated Cost CAD'].sum():.2f}
-Estimated cost saved through rescue capacity: ${actual['Estimated Cost Saved CAD'].sum():.2f}
-
-Recommended next steps:
-1. Focus first on meal/day combinations with the highest waste rate.
-2. Use RSVP or pre-order forms for low-confidence attendance events.
-3. Prepare smaller first batches for meals with low popularity.
-4. Build a verified rescue partner list before high-risk events.
-5. Keep human food-safety review separate from AI suggestions.
-
-{FOOD_SAFETY_NOTE}
-"""
+    with c2:
         st.download_button(
-            "Download impact summary",
-            data=summary,
-            file_name="food_waste_impact_summary.txt",
-            mime="text/plain",
+            "Download impact report",
+            data=report,
+            file_name=f"{st.session_state.username}_impact_report.md",
+            mime="text/markdown",
             use_container_width=True,
         )
 
-    st.markdown("### Raw data preview")
-    st.dataframe(history, use_container_width=True, hide_index=True)
+    section_header("2", "Report preview")
+    st.markdown(create_report(history))
 
 
+# -----------------------------------------------------------------------------
+# Main app
+# -----------------------------------------------------------------------------
 def main() -> None:
     inject_css()
 
@@ -1566,22 +1982,22 @@ def main() -> None:
         st.session_state.page = "Mission Control"
 
     if st.session_state.username is None:
-        show_login()
+        get_default_username_page()
         return
 
-    show_sidebar()
-    page = st.session_state.page
+    render_topbar()
+    page = navigation()
 
     if page == "Mission Control":
-        show_mission_control()
+        page_mission_control()
     elif page == "Waste Risk Scanner":
-        show_risk_scanner()
+        page_waste_risk_scanner()
     elif page == "Event Result Logger":
-        show_event_logger()
+        page_event_result_logger()
     elif page == "Impact Intelligence":
-        show_dashboard()
+        page_impact_intelligence()
     elif page == "Data & Export":
-        show_data_export()
+        page_data_export()
 
 
 if __name__ == "__main__":
