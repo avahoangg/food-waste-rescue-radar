@@ -975,6 +975,176 @@ def make_sample_data(project: str) -> pd.DataFrame:
     return pd.DataFrame(records, columns=COLUMNS)
 
 
+
+# =============================================================================
+# Prep Optimizer
+# =============================================================================
+def demand_sigma(confidence: str, expected: int) -> float:
+    base = {
+        "High": 0.07,
+        "Medium": 0.13,
+        "Low": 0.22,
+    }.get(confidence, 0.13)
+    return max(2.0, expected * base)
+
+
+def generate_demand_scenarios(event: dict[str, Any], n: int = 900) -> np.ndarray:
+    expected = max(int(event["Expected Attendance"]), 1)
+    multiplier = demand_multiplier(
+        event["Weather"],
+        event["Attendance Confidence"],
+        int(event["Menu Popularity"]),
+        event["Day"],
+    )
+    mean = expected * multiplier
+    sigma = demand_sigma(event["Attendance Confidence"], expected)
+
+    seed_text = f"{event.get('Event Name','')}-{event.get('Food','')}-{expected}-{event.get('Day','')}"
+    seed = abs(hash(seed_text)) % (2**32)
+    rng = np.random.default_rng(seed)
+
+    normal = rng.normal(mean, sigma, n)
+    event_shock = rng.choice([0, -0.12, 0.08], size=n, p=[0.76, 0.16, 0.08])
+    demand = normal * (1 + event_shock)
+    demand = np.clip(np.round(demand), 0, expected * 1.6)
+    return demand.astype(int)
+
+
+def route_total_capacity(routes: pd.DataFrame, event: dict[str, Any]) -> int:
+    if routes.empty:
+        return 0
+
+    routes = numeric(routes.copy(), ["Capacity"])
+    food = str(event.get("Food", "")).lower()
+    total = 0
+
+    for _, row in routes.iterrows():
+        capacity = int(row.get("Capacity", 0) or 0)
+        form = str(row.get("Food Form", ""))
+        route_type = str(row.get("Route Type", ""))
+
+        if route_type == "Compost program":
+            continue
+
+        if form == "Mixed food":
+            total += capacity
+        elif "snack" in food or "bar" in food or "bakery" in food:
+            if form in ["Packaged snacks", "Bakery items"]:
+                total += capacity
+        elif "fruit" in food or "produce" in food:
+            if form in ["Produce", "Mixed food"]:
+                total += capacity
+        elif form in ["Prepared meals", "Mixed food"]:
+            total += capacity
+
+    return max(total, 0)
+
+
+def evaluate_prep_candidate(
+    prepared: int,
+    event: dict[str, Any],
+    scenarios: np.ndarray,
+    rescue_capacity: int,
+    shortage_penalty: float,
+    carbon_weight: float,
+) -> dict[str, Any]:
+    cost_per = float(event["Cost per Portion"])
+    co2_per = float(event["CO2e per Portion"])
+
+    leftovers = np.maximum(prepared - scenarios, 0)
+    shortage = np.maximum(scenarios - prepared, 0)
+    rescued = np.minimum(leftovers, rescue_capacity)
+    unmanaged = np.maximum(leftovers - rescued, 0)
+
+    waste_cost = unmanaged.mean() * cost_per
+    shortage_cost = shortage.mean() * shortage_penalty
+    carbon_cost = unmanaged.mean() * co2_per * carbon_weight
+    total_score = waste_cost + shortage_cost + carbon_cost
+
+    return {
+        "Prepared Portions": int(prepared),
+        "Expected Leftovers": round(float(leftovers.mean()), 1),
+        "Expected Unmanaged Waste": round(float(unmanaged.mean()), 1),
+        "Expected Shortage": round(float(shortage.mean()), 1),
+        "Expected Rescued": round(float(rescued.mean()), 1),
+        "Shortage Risk %": round(float((shortage > 0).mean() * 100), 1),
+        "Waste Risk %": round(float((unmanaged > 0).mean() * 100), 1),
+        "Expected Cost Impact": round(float(waste_cost), 2),
+        "Expected CO2e Impact": round(float(unmanaged.mean() * co2_per), 2),
+        "Optimization Score": round(float(total_score), 2),
+    }
+
+
+def optimize_prep_plan(event: dict[str, Any], history: pd.DataFrame, routes: pd.DataFrame, risk_tolerance: str) -> dict[str, Any]:
+    result = forecast_event(event, history)
+    scenarios = generate_demand_scenarios(event)
+
+    expected = max(int(event["Expected Attendance"]), 1)
+    current = max(int(event["Food Prepared"]), 1)
+    rec_min = int(result["Recommended Min"])
+    rec_max = int(result["Recommended Max"])
+    rescue_cap = route_total_capacity(routes, event)
+
+    shortage_penalty = {
+        "Avoid shortage as much as possible": float(event["Cost per Portion"]) * 4.5,
+        "Balanced": float(event["Cost per Portion"]) * 2.8,
+        "Minimize waste as much as possible": float(event["Cost per Portion"]) * 1.5,
+    }.get(risk_tolerance, float(event["Cost per Portion"]) * 2.8)
+
+    carbon_weight = {
+        "Avoid shortage as much as possible": 0.30,
+        "Balanced": 0.55,
+        "Minimize waste as much as possible": 0.90,
+    }.get(risk_tolerance, 0.55)
+
+    low = max(1, min(rec_min, int(expected * 0.70)))
+    high = max(current, rec_max, int(expected * 1.35))
+
+    candidates = []
+    for prepared in range(low, high + 1):
+        candidates.append(
+            evaluate_prep_candidate(
+                prepared,
+                event,
+                scenarios,
+                rescue_cap,
+                shortage_penalty,
+                carbon_weight,
+            )
+        )
+
+    df = pd.DataFrame(candidates)
+    best = df.sort_values(["Optimization Score", "Expected Unmanaged Waste", "Expected Shortage"]).iloc[0].to_dict()
+
+    if event["Batch Cooking"] == "Yes":
+        first_batch = int(round(best["Prepared Portions"] * 0.78))
+    else:
+        first_batch = int(best["Prepared Portions"])
+
+    reserve = int(best["Prepared Portions"] - first_batch)
+    checkpoint = "After the first 20–25% of attendees arrive"
+
+    plan = [
+        ("T-24 hours", "Confirm attendance and menu interest with a short form or homeroom count."),
+        ("T-2 hours", f"Prepare the first batch: {first_batch} portions."),
+        ("Service start", "Track actual turnout during the first part of service."),
+        ("Checkpoint", f"{checkpoint}. Release reserve only if turnout is on pace."),
+        ("End of service", "Count leftovers and send them to the best rescue route after human food-safety review."),
+        ("After event", "Log the final numbers so the next forecast becomes smarter."),
+    ]
+
+    return {
+        "forecast": result,
+        "scenarios": scenarios,
+        "table": df,
+        "best": best,
+        "first_batch": first_batch,
+        "reserve": reserve,
+        "rescue_capacity": rescue_cap,
+        "plan": plan,
+    }
+
+
 # =============================================================================
 # Interface helpers
 # =============================================================================
@@ -1186,31 +1356,35 @@ def home_page() -> None:
 
     b1, b2, b3, b4 = st.columns(4)
     with b1:
-        if st.button("Go to Forecast", use_container_width=True):
+        if st.button("Forecast", use_container_width=True):
             st.session_state.page = "Forecast"
             st.rerun()
     with b2:
+        if st.button("Prep Optimizer", use_container_width=True):
+            st.session_state.page = "Prep Optimizer"
+            st.rerun()
+    with b3:
         if st.button("Rescue Board", use_container_width=True):
             st.session_state.page = "Rescue Board"
             st.rerun()
-    with b3:
-        if st.button("Add sample records", use_container_width=True):
-            reset_project_records(connected_project())
-            reset_project_routes(connected_project())
-            full = load_data()
-            sample = make_sample_data(connected_project())
-            full = pd.concat([full[full["Project"] != connected_project()], sample], ignore_index=True)
-            save_data(full)
-            route_full = load_routes()
-            route_sample = sample_routes(connected_project())
-            route_full = pd.concat([route_full[route_full["Project"] != connected_project()], route_sample], ignore_index=True)
-            save_routes(route_full)
-            st.success("Sample records and rescue routes added to this project.")
-            st.rerun()
     with b4:
-        if st.button("View Dashboard", use_container_width=True):
+        if st.button("Dashboard", use_container_width=True):
             st.session_state.page = "Dashboard"
             st.rerun()
+
+    if st.button("Add sample records and rescue routes", use_container_width=True):
+        reset_project_records(connected_project())
+        reset_project_routes(connected_project())
+        full = load_data()
+        sample = make_sample_data(connected_project())
+        full = pd.concat([full[full["Project"] != connected_project()], sample], ignore_index=True)
+        save_data(full)
+        route_full = load_routes()
+        route_sample = sample_routes(connected_project())
+        route_full = pd.concat([route_full[route_full["Project"] != connected_project()], route_sample], ignore_index=True)
+        save_routes(route_full)
+        st.success("Sample records and rescue routes added to this project.")
+        st.rerun()
 
     with st.container(border=True):
         st.subheader("What this project helps you do")
@@ -1219,11 +1393,11 @@ def home_page() -> None:
             st.markdown("**Predict risk**")
             st.write("See when and where food waste is likely before food is prepared.")
         with c2:
-            st.markdown("**Match a rescue route**")
-            st.write("Rank donation, student pickup, staff review, and compost options before leftovers appear.")
+            st.markdown("**Optimize preparation**")
+            st.write("Use simulation to choose total portions, first batch, and hold-back amount.")
         with c3:
-            st.markdown("**Improve the next event**")
-            st.write("Use dashboard patterns to reduce waste over time.")
+            st.markdown("**Route surplus**")
+            st.write("Match predicted leftovers to donation, pickup, review, or compost routes.")
 
 
 def forecast_page() -> None:
@@ -1595,6 +1769,172 @@ def dashboard_page() -> None:
     st.dataframe(df[show_cols].tail(15), use_container_width=True)
 
 
+def prep_optimizer_page() -> None:
+    st.title("Prep Optimizer")
+    st.write(
+        "Use this before a larger event. The optimizer simulates many possible attendance outcomes and finds a preparation plan that balances waste, shortage risk, cost, carbon impact, and rescue capacity."
+    )
+
+    event = collect_event_form("optimizer", include_actual=False)
+
+    with st.container(border=True):
+        st.subheader("Optimization goal")
+        risk_tolerance = st.selectbox(
+            "What matters most for this event?",
+            [
+                "Balanced",
+                "Avoid shortage as much as possible",
+                "Minimize waste as much as possible",
+            ],
+            help="Choose the tradeoff. A cafeteria may choose balanced. A competition banquet may avoid shortage. A small club may minimize waste.",
+        )
+
+    if st.button("Optimize preparation plan", use_container_width=True):
+        history = project_data(connected_project())
+        routes = project_routes(connected_project())
+        optimization = optimize_prep_plan(event, history, routes, risk_tolerance)
+
+        best = optimization["best"]
+        forecast = optimization["forecast"]
+        table = optimization["table"]
+
+        st.divider()
+        st.header("Recommended plan")
+        risk_message(forecast["Risk Level"])
+        metric_grid(
+            [
+                ("Prepare total", f"{int(best['Prepared Portions'])}", "Optimized total portions."),
+                ("First batch", f"{optimization['first_batch']}", "Prepare before service starts."),
+                ("Hold back", f"{optimization['reserve']}", "Keep flexible until checkpoint."),
+                ("Shortage risk", f"{best['Shortage Risk %']:.1f}%", "Chance demand is higher than prepared."),
+            ]
+        )
+
+        metric_grid(
+            [
+                ("Expected leftovers", f"{best['Expected Leftovers']:.1f}", "Average across simulations."),
+                ("Expected rescued", f"{best['Expected Rescued']:.1f}", "Based on saved rescue routes."),
+                ("Unmanaged waste", f"{best['Expected Unmanaged Waste']:.1f}", "Leftovers not matched to a rescue route."),
+                ("CO₂e impact", f"{best['Expected CO2e Impact']:.1f} kg", "Estimated unmanaged waste impact."),
+            ]
+        )
+
+        with st.container(border=True):
+            st.subheader("Service timeline")
+            for time_label, step in optimization["plan"]:
+                st.write(f"**{time_label}:** {step}")
+
+        with st.container(border=True):
+            st.subheader("Why this plan is better")
+            current_row = evaluate_prep_candidate(
+                int(event["Food Prepared"]),
+                event,
+                optimization["scenarios"],
+                optimization["rescue_capacity"],
+                float(event["Cost per Portion"]) * 2.8,
+                0.55,
+            )
+            comparison = pd.DataFrame(
+                [
+                    {"Plan": "Current plan", **current_row},
+                    {"Plan": "Optimized plan", **best},
+                ]
+            )
+            st.dataframe(
+                comparison[
+                    [
+                        "Plan",
+                        "Prepared Portions",
+                        "Expected Unmanaged Waste",
+                        "Expected Shortage",
+                        "Expected Rescued",
+                        "Shortage Risk %",
+                        "Expected Cost Impact",
+                        "Expected CO2e Impact",
+                    ]
+                ],
+                use_container_width=True,
+            )
+
+        if PLOTLY_OK:
+            st.subheader("Tradeoff curve")
+            fig = go.Figure()
+            fig.add_trace(
+                go.Scatter(
+                    x=table["Prepared Portions"],
+                    y=table["Expected Unmanaged Waste"],
+                    mode="lines",
+                    name="Unmanaged waste",
+                    line=dict(color="#2E7D4F", width=4),
+                )
+            )
+            fig.add_trace(
+                go.Scatter(
+                    x=table["Prepared Portions"],
+                    y=table["Expected Shortage"],
+                    mode="lines",
+                    name="Shortage",
+                    line=dict(color="#B7964A", width=4),
+                )
+            )
+            fig.add_vline(
+                x=int(best["Prepared Portions"]),
+                line_dash="dash",
+                line_color="#17442F",
+                annotation_text="optimized",
+            )
+            fig.update_layout(
+                height=370,
+                margin=dict(l=10, r=10, t=30, b=10),
+                paper_bgcolor="rgba(0,0,0,0)",
+                plot_bgcolor="rgba(255,253,247,.72)",
+                font=dict(color="#173528"),
+                xaxis_title="Prepared portions",
+                yaxis_title="Expected portions",
+            )
+            st.plotly_chart(fig, use_container_width=True)
+
+            st.subheader("Demand simulation")
+            fig2 = px.histogram(
+                pd.DataFrame({"Simulated Demand": optimization["scenarios"]}),
+                x="Simulated Demand",
+                nbins=28,
+                color_discrete_sequence=["#2E7D4F"],
+            )
+            fig2.add_vline(
+                x=int(best["Prepared Portions"]),
+                line_dash="dash",
+                line_color="#B7964A",
+                annotation_text="optimized prep",
+            )
+            fig2.update_layout(
+                height=330,
+                margin=dict(l=10, r=10, t=30, b=10),
+                paper_bgcolor="rgba(0,0,0,0)",
+                plot_bgcolor="rgba(255,253,247,.72)",
+                font=dict(color="#173528"),
+            )
+            st.plotly_chart(fig2, use_container_width=True)
+
+        st.subheader("Rescue route fit")
+        scored_routes = rescue_route_scores(event, forecast, routes)
+        if scored_routes.empty:
+            st.warning("No rescue routes saved yet. Add routes in Rescue Board to improve the optimizer.")
+        else:
+            st.dataframe(
+                scored_routes[
+                    [
+                        "Route Name",
+                        "Route Type",
+                        "Capacity",
+                        "Pickup Minutes",
+                        "Readiness Score",
+                        "Recommendation",
+                    ]
+                ],
+                use_container_width=True,
+            )
+
 def rescue_board_page() -> None:
     st.title("Rescue Board")
     st.write(
@@ -1788,7 +2128,7 @@ def main() -> None:
     if not project_gate():
         return
 
-    pages = ["Home", "Forecast", "Rescue Board", "Log Result", "Dashboard", "Report", "Project Settings"]
+    pages = ["Home", "Forecast", "Prep Optimizer", "Rescue Board", "Log Result", "Dashboard", "Report", "Project Settings"]
     current = st.session_state.page if st.session_state.page in pages else "Home"
     page = st.radio("Navigation", pages, index=pages.index(current), horizontal=True, label_visibility="collapsed")
     st.session_state.page = page
@@ -1797,6 +2137,8 @@ def main() -> None:
         home_page()
     elif page == "Forecast":
         forecast_page()
+    elif page == "Prep Optimizer":
+        prep_optimizer_page()
     elif page == "Rescue Board":
         rescue_board_page()
     elif page == "Log Result":
