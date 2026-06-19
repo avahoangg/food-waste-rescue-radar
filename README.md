@@ -1,6 +1,6 @@
 # Food Rescue Radar
 
-Food Rescue Radar is an AI-powered Streamlit app that helps schools and community groups predict food waste before it happens. This version includes a polished onboarding flow and a luxury green interface built for student teams. The app interface is written for students and event teams, while API setup stays in deployment settings.
+Food Rescue Radar is an AI-powered Streamlit app that helps schools and community groups predict food waste before it happens. This version uses a clear onboarding homepage with FAQ and feature guidance. The app interface is written for students and event teams, while API setup stays in deployment settings.
 
 ## What it does
 
